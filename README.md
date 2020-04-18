@@ -25,12 +25,14 @@ Flags:
   -n, --count uint                  Amount of validators to assign
   -h, --help                        help for assign
       --host-keys-pass string       Pass for the keys in the output wallet. Empty to disable
-      --host-wallet string          Path of the output wallet for the host, where a keystore of assigned keys is written (default "assigned_wallet.json")
+      --host-wallet-loc string      Path of the output wallet for the host, where a keystore of assigned keys is written (default "assigned_wallet")
+      --host-wallet-name string     Name of the wallet, applicable if e.g. an ethdo wallet type. (default "Assigned")
       --host-wallet-pass string     Pass for the output wallet itself. Empty to disable
       --hostname string             Unique name of the remote host to assign validators to (default "morty")
-      --out-wallet-type string      Type of the output wallet
+      --out-wallet-type string      Type of the output wallet (default "ethdo")
       --source-keys-pass string     Pass for the source wallet itself. Empty to disable
-      --source-wallet string        Path of the source wallet, empty to use default
+      --source-wallet-loc string    Path of the source wallet, empty to use default
+      --source-wallet-name string   Name of the wallet to look for keys in (default "Validators")
       --source-wallet-pass string   Pass for the keys in the source wallet. Empty to disable
 ```
 

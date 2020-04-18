@@ -170,14 +170,27 @@ func (r *RawWallet) Write() error {
 	return ioutil.WriteFile(r.Path, data, 0644)
 }
 
+func storeWithOptions(pass string, loc string) types.Store {
+	storeOpts := make([]filesystem.Option, 0)
+	if pass != "" {
+		storeOpts = append(storeOpts, filesystem.WithPassphrase([]byte(pass)))
+	}
+	if loc != "" {
+		storeOpts = append(storeOpts, filesystem.WithLocation(loc))
+	}
+	return filesystem.New(storeOpts...)
+}
+
 func assignCommand() *cobra.Command {
 
 	var outputWalletType string
 	var outputWalletLoc string
+	var outputWalletName string
 	var outWalletPass string
 	var outKeyPass string
 
 	var sourceWalletLoc string
+	var sourceWalletName string
 	var sourceWalletPass string
 	var sourceKeyPass string
 
@@ -191,43 +204,58 @@ func assignCommand() *cobra.Command {
 		Short: "Assign `n` available validators to `hostname`. If --add is true, it will add `n` assigned validators, instead of filling up to `n` total assigned to the host",
 		Args:  cobra.NoArgs,
 		Run: func(cmd *cobra.Command, args []string) {
-			storeOpts := make([]filesystem.Option, 0)
-			if sourceWalletPass != "" {
-				storeOpts = append(storeOpts, filesystem.WithPassphrase([]byte(sourceWalletPass)))
-			}
-			if sourceWalletLoc != "" {
-				storeOpts = append(storeOpts, filesystem.WithLocation(sourceWalletLoc))
-			}
-			store := filesystem.New(storeOpts...)
-			wal, err := e2wallet.OpenWallet("Validators", e2wallet.WithStore(store))
+			wal, err := e2wallet.OpenWallet(sourceWalletName, e2wallet.WithStore(storeWithOptions(sourceWalletPass, sourceWalletLoc)))
 			if err != nil {
 				cmd.PrintErr(err)
 				return
 			}
+			var outWallet types.WalletAccountImporter
 
-			// TODO output wallet type
-			outStore := &RawWallet{Path: outputWalletLoc}
+			if outputWalletType == "raw" {
+				outWallet = &RawWallet{Path: outputWalletLoc}
+			} else if outputWalletType == "ethdo" {
+				outWal, err := e2wallet.OpenWallet(outputWalletName, e2wallet.WithStore(storeWithOptions(outWalletPass, outputWalletLoc)))
+				if err != nil {
+					// Create wallet if it does not exist yet
+					if err.Error() == "wallet not found" {
+						store := storeWithOptions(outWalletPass, outputWalletLoc)
+						outWal, err = e2wallet.CreateWallet(outputWalletName, e2wallet.WithStore(store))
+						if err != nil {
+							cmd.PrintErr(err)
+							return
+						}
+					} else {
+						cmd.PrintErr(err)
+						return
+					}
+				}
+				if err := outWal.Unlock([]byte(outWalletPass)); err != nil {
+					cmd.PrintErr(err)
+					return
+				}
+				var ok bool
+				outWallet, ok = outWal.(types.WalletAccountImporter)
+				if !ok {
+					cmd.PrintErr("output wallet cannot import keys")
+					return
+				}
+			}
 
-			if err := assignVals(wal, outStore, []byte(sourceKeyPass), []byte(outKeyPass), assignmentsLoc, hostname, count, addCount); err != nil {
+			if err := assignVals(wal, outWallet, []byte(sourceKeyPass), []byte(outKeyPass), assignmentsLoc, hostname, count, addCount); err != nil {
 				cmd.PrintErr(err)
 				return
 			}
-
-			dat, err := json.Marshal(outStore)
-			if err != nil {
-				cmd.PrintErr(err)
-				return
-			}
-			fmt.Println(string(dat))
 		},
 	}
 
-	cmd.Flags().StringVar(&outputWalletType, "out-wallet-type", "", "Type of the output wallet")
-	cmd.Flags().StringVar(&outputWalletLoc, "host-wallet", "assigned_wallet.json", "Path of the output wallet for the host, where a keystore of assigned keys is written")
+	cmd.Flags().StringVar(&outputWalletType, "out-wallet-type", "ethdo", "Type of the output wallet")
+	cmd.Flags().StringVar(&outputWalletLoc, "host-wallet-loc", "assigned_wallet", "Path of the output wallet for the host, where a keystore of assigned keys is written")
+	cmd.Flags().StringVar(&outputWalletName, "host-wallet-name", "Assigned", "Name of the wallet, applicable if e.g. an ethdo wallet type.")
 	cmd.Flags().StringVar(&outWalletPass, "host-wallet-pass", "", "Pass for the output wallet itself. Empty to disable")
 	cmd.Flags().StringVar(&outKeyPass, "host-keys-pass", "", "Pass for the keys in the output wallet. Empty to disable")
 
-	cmd.Flags().StringVar(&sourceWalletLoc, "source-wallet", "", "Path of the source wallet, empty to use default")
+	cmd.Flags().StringVar(&sourceWalletLoc, "source-wallet-loc", "", "Path of the source wallet, empty to use default")
+	cmd.Flags().StringVar(&sourceWalletName, "source-wallet-name", "Validators", "Name of the wallet to look for keys in")
 	cmd.Flags().StringVar(&sourceWalletPass, "source-wallet-pass", "", "Pass for the keys in the source wallet. Empty to disable")
 	cmd.Flags().StringVar(&sourceKeyPass, "source-keys-pass", "", "Pass for the source wallet itself. Empty to disable")
 
@@ -285,7 +313,7 @@ func assignVals(wallet types.Wallet, outputWallet types.WalletAccountImporter, s
 			}
 		}
 
-		fmt.Printf("keeping %d/%d previous assignments, and adding %d for total of %d assigned to %s\n",
+		fmt.Printf("keeping %d/%d previous assignments, and adding %d for total of %d assigned to \"%s\"\n",
 			len(newAssignedToHost), prevAssignedToHostCount, toAssign, prevAssignedToHostCount+toAssign, hostname)
 
 		assignmentTime := fmt.Sprintf("%d", time.Now().Unix())
@@ -349,7 +377,11 @@ func assignVals(wallet types.Wallet, outputWallet types.WalletAccountImporter, s
 				return fmt.Errorf("cannot read priv key for account %s with pubkey %s: %v", a.ID().String(), entry.Pubkey, err)
 			}
 			if _, err := outputWallet.ImportAccount(entry.Pubkey, priv.Marshal(), outKeyPass); err != nil {
-				return fmt.Errorf("failed to import account %s with pubkey %s into output wallet: %v", a.ID().String(), entry.Pubkey, err)
+				if err.Error() == fmt.Sprintf("account with name \"%s\" already exists", entry.Pubkey) {
+					fmt.Printf("Account with pubkey %s already exists in output wallet, skipping it\n", entry.Pubkey)
+				} else {
+					return fmt.Errorf("failed to import account %s with pubkey %s into output wallet: %v", a.ID().String(), entry.Pubkey, err)
+				}
 			}
 		}
 		return nil
@@ -373,7 +405,7 @@ func assignVals(wallet types.Wallet, outputWallet types.WalletAccountImporter, s
 func main() {
 	rootCmd := &cobra.Command{
 		Use:   "eth2-val-tools",
-		Short: "Manage Eth2 validator assignments - USE AT OWN RISK",
+		Short: "Manage Eth2 validator assignments - USE AT YOUR OWN RISK",
 		Long:  `Manage Eth2 validator assignments for automated deployments, built by @protolambda.`,
 		Run: func(cmd *cobra.Command, args []string) {
 			_ = cmd.Help()
