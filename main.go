@@ -204,11 +204,14 @@ func assignCommand() *cobra.Command {
 		Short: "Assign `n` available validators to `hostname`. If --add is true, it will add `n` assigned validators, instead of filling up to `n` total assigned to the host",
 		Args:  cobra.NoArgs,
 		Run: func(cmd *cobra.Command, args []string) {
-			wal, err := e2wallet.OpenWallet(sourceWalletName, e2wallet.WithStore(storeWithOptions(sourceWalletPass, sourceWalletLoc)))
-			if err != nil {
-				cmd.PrintErr(err)
-				return
+			checkErr := func(err error) {
+				if err != nil {
+					cmd.PrintErr(err)
+					os.Exit(1)
+				}
 			}
+			wal, err := e2wallet.OpenWallet(sourceWalletName, e2wallet.WithStore(storeWithOptions(sourceWalletPass, sourceWalletLoc)))
+			checkErr(err)
 			var outWallet types.WalletAccountImporter
 
 			if outputWalletType == "raw" {
@@ -220,31 +223,20 @@ func assignCommand() *cobra.Command {
 					if err.Error() == "wallet not found" {
 						store := storeWithOptions(outWalletPass, outputWalletLoc)
 						outWal, err = e2wallet.CreateWallet(outputWalletName, e2wallet.WithStore(store))
-						if err != nil {
-							cmd.PrintErr(err)
-							return
-						}
+						checkErr(err)
 					} else {
-						cmd.PrintErr(err)
-						return
+						checkErr(err)
 					}
 				}
-				if err := outWal.Unlock([]byte(outWalletPass)); err != nil {
-					cmd.PrintErr(err)
-					return
-				}
+				checkErr(outWal.Unlock([]byte(outWalletPass)))
 				var ok bool
 				outWallet, ok = outWal.(types.WalletAccountImporter)
 				if !ok {
-					cmd.PrintErr("output wallet cannot import keys")
-					return
+					checkErr(errors.New("output wallet cannot import keys"))
 				}
 			}
 
-			if err := assignVals(wal, outWallet, []byte(sourceKeyPass), []byte(outKeyPass), assignmentsLoc, hostname, count, addCount); err != nil {
-				cmd.PrintErr(err)
-				return
-			}
+			checkErr(assignVals(wal, outWallet, []byte(sourceKeyPass), []byte(outKeyPass), assignmentsLoc, hostname, count, addCount))
 		},
 	}
 
@@ -413,5 +405,7 @@ func main() {
 	}
 	rootCmd.AddCommand(assignCommand())
 
-	rootCmd.Execute()
+	if err := rootCmd.Execute(); err != nil {
+		os.Exit(1)
+	}
 }
