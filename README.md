@@ -36,6 +36,8 @@ Flags:
       --source-wallet-pass string   Pass for the keys in the source wallet. Empty to disable
 ```
 
+Account names will be the hex-encoded pubkey of the respective account.
+
 ## License
 
 MIT, see [`LICENSE`](./LICENSE) file.

@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	filelock "github.com/MichaelS11/go-file-lock"
 	"github.com/google/uuid"
 	hbls "github.com/herumi/bls-eth-go-binary/bls"
-	"github.com/juju/fslock"
 	"github.com/spf13/cobra"
 	e2wallet "github.com/wealdtech/go-eth2-wallet"
 	filesystem "github.com/wealdtech/go-eth2-wallet-store-filesystem"
@@ -65,19 +65,10 @@ type ValidatorAssignments struct {
 	CurrentAssignments []ValidatorAssignEntry `json:"current_assignments"`
 }
 
-func (vas *ValidatorAssignments) FindCurrentAssignments(hostname string) (out []ValidatorAssignEntry) {
-	for _, a := range vas.CurrentAssignments {
-		if a.Host == hostname {
-			out = append(out, a)
-		}
-	}
-	return out
-}
-
 type AssignmentsView struct {
 	Assignments *ValidatorAssignments
 	filepath    string
-	lock        *fslock.Lock
+	lock        *filelock.LockHandle
 }
 
 func (v *AssignmentsView) Unlock() error {
@@ -101,10 +92,18 @@ func (v *AssignmentsView) Write() error {
 
 func LoadAssignments(filepath string) (*AssignmentsView, error) {
 	// acquire file lock over assignments, we need to be very strict about not double writing, or reading concurrently
-	lock := fslock.New(filepath + ".lock")
-	lockErr := lock.Lock()
-	if lockErr != nil {
-		return nil, fmt.Errorf("failed to acquire lock: %v", lockErr)
+	var lock *filelock.LockHandle
+	for {
+		var err error
+		lock, err = filelock.New(filepath + ".lock")
+		if err != nil && err == filelock.ErrFileIsBeingUsed {
+			time.Sleep(time.Second * 2)
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("failed to acquire lock: %v", err)
+		}
+		break
 	}
 
 	var obj ValidatorAssignments
@@ -129,6 +128,8 @@ func LoadAssignments(filepath string) (*AssignmentsView, error) {
 			_ = lock.Unlock()
 			return nil, err
 		}
+	} else {
+		//os.Exit(1)
 	}
 	return &AssignmentsView{
 		Assignments: &obj,
@@ -144,7 +145,7 @@ type Keypair struct {
 
 type RawWallet struct {
 	Pairs []Keypair
-	Path string
+	Path  string
 }
 
 func (r *RawWallet) ImportAccount(name string, key []byte, passphrase []byte) (types.Account, error) {
@@ -236,7 +237,7 @@ func assignCommand() *cobra.Command {
 				}
 			}
 
-			checkErr(assignVals(wal, outWallet, []byte(sourceKeyPass), []byte(outKeyPass), assignmentsLoc, hostname, count, addCount))
+			checkErr(assignVals(wal, outWallet, outputWalletName, []byte(sourceKeyPass), []byte(outKeyPass), assignmentsLoc, hostname, count, addCount))
 		},
 	}
 
@@ -259,19 +260,17 @@ func assignCommand() *cobra.Command {
 	return cmd
 }
 
-func assignVals(wallet types.Wallet, outputWallet types.WalletAccountImporter, sourceKeyPass []byte, outKeyPass []byte, assignmentsPath string, hostname string, n uint64, addAssignments bool) error {
+func assignVals(wallet types.Wallet, outputWallet types.WalletAccountImporter, outputWalletName string, sourceKeyPass []byte, outKeyPass []byte, assignmentsPath string, hostname string, n uint64, addAssignments bool) error {
 	va, err := LoadAssignments(assignmentsPath)
 	if err != nil {
 		return err
 	}
 
 	err = func() error {
-		currentAssignments := va.Assignments.FindCurrentAssignments(hostname)
-
 		var prevAssignedToHost []ValidatorAssignEntry
 		var prevAssignedToOther []ValidatorAssignEntry
 		assignedPubkeys := make(map[string]struct{})
-		for _, a := range currentAssignments {
+		for _, a := range va.Assignments.CurrentAssignments {
 			// Check that there are no duplicate pubkeys in the previous store
 			_, exists := assignedPubkeys[a.Pubkey]
 			if exists {
@@ -305,8 +304,8 @@ func assignVals(wallet types.Wallet, outputWallet types.WalletAccountImporter, s
 			}
 		}
 
-		fmt.Printf("keeping %d/%d previous assignments, and adding %d for total of %d assigned to \"%s\"\n",
-			len(newAssignedToHost), prevAssignedToHostCount, toAssign, prevAssignedToHostCount+toAssign, hostname)
+		fmt.Printf("keeping %d/%d previous assignments to host (excl %d for others), and adding %d for total of %d assigned to \"%s\"\n",
+			len(newAssignedToHost), prevAssignedToHostCount, len(prevAssignedToOther), toAssign, prevAssignedToHostCount+toAssign, hostname)
 
 		assignmentTime := fmt.Sprintf("%d", time.Now().Unix())
 
@@ -368,7 +367,8 @@ func assignVals(wallet types.Wallet, outputWallet types.WalletAccountImporter, s
 			if err != nil {
 				return fmt.Errorf("cannot read priv key for account %s with pubkey %s: %v", a.ID().String(), entry.Pubkey, err)
 			}
-			if _, err := outputWallet.ImportAccount(entry.Pubkey, priv.Marshal(), outKeyPass); err != nil {
+			// account names must be prefixed with wallet name
+			if _, err := outputWallet.ImportAccount(outputWalletName+"/"+entry.Pubkey, priv.Marshal(), outKeyPass); err != nil {
 				if err.Error() == fmt.Sprintf("account with name \"%s\" already exists", entry.Pubkey) {
 					fmt.Printf("Account with pubkey %s already exists in output wallet, skipping it\n", entry.Pubkey)
 				} else {
