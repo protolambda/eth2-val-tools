@@ -15,3 +15,11 @@
 *.json
 # lock file
 *.lock
+
+wallets
+
+deposit_datas.txt
+
+backup
+
+*secret.sh
