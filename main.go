@@ -414,6 +414,11 @@ func assignCommand() *cobra.Command {
 	return cmd
 }
 
+// Narrow pubkeys: we don't want 0xAb... to be different from ab...
+func narrowedPubkey(pub string) string {
+	return strings.TrimPrefix(strings.ToLower(pub), "0x")
+}
+
 func assignVals(wallet types.Wallet, output WalletOutput,
 	accountPasswords AccountPasswords, assignmentsPath string, hostname string, n uint64, addAssignments bool) error {
 
@@ -427,12 +432,13 @@ func assignVals(wallet types.Wallet, output WalletOutput,
 		var prevAssignedToOther []ValidatorAssignEntry
 		assignedPubkeys := make(map[string]struct{})
 		for _, a := range va.Assignments.CurrentAssignments {
+			pub := narrowedPubkey(a.Pubkey)
 			// Check that there are no duplicate pubkeys in the previous store
-			_, exists := assignedPubkeys[a.Pubkey]
+			_, exists := assignedPubkeys[pub]
 			if exists {
 				return errors.New("DANGER !!!: current assignments contain duplicate pubkey\n")
 			}
-			assignedPubkeys[a.Pubkey] = struct{}{}
+			assignedPubkeys[pub] = struct{}{}
 			if a.Host == hostname {
 				prevAssignedToHost = append(prevAssignedToHost, a)
 			} else {
@@ -476,7 +482,7 @@ func assignVals(wallet types.Wallet, output WalletOutput,
 					fmt.Printf("Password for account %s is not known, looking for another account to assign.\n", name)
 					continue
 				}
-				pubkey := strings.ToLower(hex.EncodeToString(a.PublicKey().Marshal()))
+				pubkey := narrowedPubkey(hex.EncodeToString(a.PublicKey().Marshal()))
 				// Add the account if it is not already assigned
 				if _, ok := assignedPubkeys[pubkey]; !ok {
 					fmt.Printf("Assigning account %s with pub %s\n", a.Name(), pubkey)
