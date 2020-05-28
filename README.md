@@ -53,7 +53,7 @@ In the output directory, a `prysm` dir is placed, with the following contents:
   - The wallet name is called `Assigned`, and the keys are `Assigned/val_<pubkey here>` (excluding `<` and `>`) The pubkey is hex encoded, without `0x`.
   - The wallet also contains an `index` file and all other ethdo-specific things
 
-### Lighthouse
+#### Lighthouse
 
 Lighthouse is key-centric, no wallets involved. Following EIP 2335.
 
@@ -64,7 +64,7 @@ The output is:
 - `keys` directory, containing one directory per validator. Named after the pubkey (hex-encoded, `0x` prefix).
  Each directory contains a `key.json`, an EIP 2335 keystore file, with `path` field set to empty string.
 
-### Teku
+#### Teku
 
 Like Lighthouse, Teku is also key-centric, but requires you to be explicit about finding keys. I.e. you need the CLI options:
 ```
