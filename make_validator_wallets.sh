@@ -35,16 +35,17 @@ echo "Creating validator wallet"
 
 for ((i=$account_start;i<=$account_end;i++));
 do
-   echo "Creating validator account $validator_wallet_name/$i"
+   account_name="$validator_wallet_name/$i"
+   echo "Creating validator account $account_name"
 
    # Generate a password for the account. A base64 string. (and remove the newline from the output)
    account_passphrase=$(openssl rand -base64 32 | tr -d '\n')
 
    ~/go/bin/ethdo account create \
       --basedir="$walletbasedir" \
-      --account="$validator_wallet_name/$i" \
+      --account="$account_name" \
       --walletpassphrase="$validator_wallet_passphrase" \
       --passphrase="$account_passphrase"
 
-   echo "\"$validator_wallet_name/$i\",\"$account_passphrase\"" >> "$account_passwords_csv_file"
+   echo "\"$account_name\",\"$account_passphrase\"" >> "$account_passwords_csv_file"
 done
