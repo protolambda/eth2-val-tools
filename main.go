@@ -274,6 +274,9 @@ func (ww *WalletWriter) buildPrysmWallet(outPath string, keyMngWalletLoc string)
 }
 
 func (ww *WalletWriter) WriteMetaOutputs(filepath string, keyMngWalletLoc string) error {
+	if _, err := os.Stat(filepath); !os.IsNotExist(err) {
+		return errors.New("output for assignments already exists! Aborting")
+	}
 	if err := os.MkdirAll(filepath, os.ModePerm); err != nil {
 		return err
 	}
@@ -503,7 +506,7 @@ func assignVals(wallet types.Wallet, output WalletOutput,
 			}
 		}
 
-		fmt.Printf("Read %d accounts from wallet to find as many unassigned accounts as needed\n", accountCount)
+		fmt.Printf("Read %d accounts from wallet to find as many unassigned accounts as needed. Can assign %d to host\n", accountCount, len(newAssignedToHost))
 
 		// keep previous assignments to other hosts, along with new set of assignments for new host
 		va.Assignments.CurrentAssignments = append(prevAssignedToOther, newAssignedToHost...)
@@ -523,7 +526,7 @@ func assignVals(wallet types.Wallet, output WalletOutput,
 		for _, entry := range newAssignedToHost {
 			password, ok := accountPasswords[fmt.Sprintf("%s/%s", wallet.Name(), entry.SourceAccountName)]
 			if !ok {
-				fmt.Printf("Password for assigned account %s is not known. Not assigning it.\n", entry.SourceAccountName)
+				fmt.Printf("Password for assigned account %s is not known. Skipping, assigned but not including its key.\n", entry.SourceAccountName)
 				continue
 			}
 			a, err := wallet.AccountByID(entry.AccountID.UUID)
