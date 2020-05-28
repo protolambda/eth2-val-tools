@@ -159,7 +159,7 @@ func storeWithOptions(pass string, loc string) types.Store {
 }
 
 type WalletOutput interface {
-	InsertAccount(name string, priv e2types.PrivateKey) error
+	InsertAccount(priv e2types.PrivateKey) error
 }
 
 // Following EIP 2335
@@ -175,7 +175,7 @@ type KeyEntry struct {
 	passphrase string
 }
 
-func NewKeyEntry(name string, priv e2types.PrivateKey) (*KeyEntry, error) {
+func NewKeyEntry(priv e2types.PrivateKey) (*KeyEntry, error) {
 	var pass [32]byte
 	n, err := rand.Read(pass[:])
 	if err != nil {
@@ -189,7 +189,7 @@ func NewKeyEntry(name string, priv e2types.PrivateKey) (*KeyEntry, error) {
 	return &KeyEntry{
 		KeyFile:    KeyFile{
 			id:        uuid.New(),
-			name:      name,
+			name:      "val_"+hex.EncodeToString(priv.PublicKey().Marshal()),
 			publicKey: priv.PublicKey(),
 			secretKey: priv,
 		},
@@ -223,8 +223,8 @@ type WalletWriter struct {
 	entries []*KeyEntry
 }
 
-func (ww *WalletWriter) InsertAccount(name string, priv e2types.PrivateKey) error {
-	key, err := NewKeyEntry(name, priv)
+func (ww *WalletWriter) InsertAccount(priv e2types.PrivateKey) error {
+	key, err := NewKeyEntry(priv)
 	if err != nil {
 		return err
 	}
@@ -238,14 +238,50 @@ type KeyManagerOpts struct {
 	Passphrases []string `json:"passphrases"`
 }
 
+func (ww *WalletWriter) buildPrysmWallet(outPath string, keyMngWalletLoc string) error {
+	ndStorePath := path.Join(outPath, "wallets")
+	walletName := "Assigned"
+	outWal, err := e2wallet.CreateWallet(walletName,
+		e2wallet.WithStore(filesystem.New(filesystem.WithLocation(ndStorePath))),
+		e2wallet.WithType("nd"))
+	if err != nil {
+		return err
+	}
+	// nd wallets always unlock
+	_ = outWal.Unlock(nil)
+	outWallet := outWal.(types.WalletAccountImporter)
+	for _, e := range ww.entries {
+		name := fmt.Sprintf("%s/%s", walletName, e.name)
+		if _, err := outWallet.ImportAccount(name, e.secretKey.Marshal(), []byte(e.passphrase)); err != nil {
+			return err
+		}
+	}
+
+	// write a json configuration to specify accounts and passwords
+	keyManagerOpts := KeyManagerOpts{Location: keyMngWalletLoc}
+	for _, e := range ww.entries {
+		keyManagerOpts.Accounts = append(keyManagerOpts.Accounts, fmt.Sprintf("%s/%s", walletName, e.name))
+		keyManagerOpts.Passphrases = append(keyManagerOpts.Passphrases, e.passphrase)
+	}
+	optsData, err := json.Marshal(&keyManagerOpts)
+	if err != nil {
+		return err
+	}
+	if err := ioutil.WriteFile(path.Join(outPath, "keymanager_opts.json"), optsData, 0644); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (ww *WalletWriter) WriteMetaOutputs(filepath string, keyMngWalletLoc string) error {
 	if err := os.MkdirAll(filepath, os.ModePerm); err != nil {
 		return err
 	}
 	keyfileName := "key.json"
+	keyfilesPath := path.Join(filepath, "keys")
 	// For all: write JSON keystore files, each in their own directory (lighthouse requirement)
 	for _, e := range ww.entries {
-		keyDirPath := path.Join(filepath, e.id.String())
+		keyDirPath := path.Join(keyfilesPath, e.PubHex())
 		if err := os.MkdirAll(keyDirPath, os.ModePerm); err != nil {
 			return err
 		}
@@ -256,20 +292,6 @@ func (ww *WalletWriter) WriteMetaOutputs(filepath string, keyMngWalletLoc string
 		if err := ioutil.WriteFile(path.Join(keyDirPath, keyfileName), dat, 0644); err != nil {
 			return err
 		}
-	}
-
-	// For Prysm: a json configuration to specify accounts and passwords
-	keyManagerOpts := KeyManagerOpts{Location: keyMngWalletLoc}
-	for _, e := range ww.entries {
-		keyManagerOpts.Accounts = append(keyManagerOpts.Accounts, e.name)
-		keyManagerOpts.Passphrases = append(keyManagerOpts.Passphrases, e.passphrase)
-	}
-	optsData, err := json.Marshal(&keyManagerOpts)
-	if err != nil {
-		return err
-	}
-	if err := ioutil.WriteFile(path.Join(filepath, "keymanager_opts.json"), optsData, 0644); err != nil {
-		return err
 	}
 
 	// For Lighthouse: they need a directory that maps pubkey to passwords, one per file
@@ -284,18 +306,21 @@ func (ww *WalletWriter) WriteMetaOutputs(filepath string, keyMngWalletLoc string
 		}
 	}
 
-	// For Teku: a json mapping that maps account file path to pubkey
-	// (to then refer to lighthouse files for each of the pubkeys, through --validators-key-files)
-	accPathToPubk := make(map[string]string)
+	// For Teku: a list of pubkeys. Used to find the keys and secrets to start a client with.
+	pubkeys := make([]string, 0)
 	for _, e := range ww.entries {
-		p := fmt.Sprintf("%s/%s", e.id.String(), keyfileName)
-		accPathToPubk[p] = "secrets/"+e.PubHex()
+		pubkeys = append(pubkeys, e.PubHex())
 	}
-	a2pData, err := json.Marshal(accPathToPubk)
+	pubsData, err := json.Marshal(pubkeys)
 	if err != nil {
 		return err
 	}
-	if err := ioutil.WriteFile(path.Join(filepath, "key_path_to_passphrase_path.json"), a2pData, 0644); err != nil {
+	if err := ioutil.WriteFile(path.Join(filepath, "pubkeys.json"), pubsData, 0644); err != nil {
+		return err
+	}
+
+	// For Prysm: write outputs as a wallet and a configuration
+	if err := ww.buildPrysmWallet(path.Join(filepath, "prysm"), keyMngWalletLoc); err != nil {
 		return err
 	}
 	return nil
@@ -335,9 +360,7 @@ func assignCommand() *cobra.Command {
 
 	var keyMngWalletLoc string
 
-	var outputWalletLoc string
-	var outputWalletMetaLoc string
-	var outputWalletName string
+	var outputDataPath string
 
 	var sourceWalletLoc string
 	var sourceWalletName string
@@ -369,16 +392,13 @@ func assignCommand() *cobra.Command {
 			checkErr(err)
 
 			ww := &WalletWriter{}
-			checkErr(assignVals(wal, ww, outputWalletName, accountPasswords, assignmentsLoc, hostname, count, addCount))
-			checkErr(ww.WriteMetaOutputs(outputWalletMetaLoc, keyMngWalletLoc))
+			checkErr(assignVals(wal, ww, accountPasswords, assignmentsLoc, hostname, count, addCount))
+			checkErr(ww.WriteMetaOutputs(outputDataPath, keyMngWalletLoc))
 		},
 	}
-	cmd.Flags().StringVar(&keyMngWalletLoc, "key-man-loc", "", "Location to write to the 'location' field in the keymanager_opts.json file")
+	cmd.Flags().StringVar(&keyMngWalletLoc, "key-man-loc", "", "Location to write to the 'location' field in the keymanager_opts.json file (Prysm only)")
 
-	cmd.Flags().StringVar(&outputWalletLoc, "host-wallet-loc", "assigned_wallet", "Path of the output wallet for the host, where a keystore of assigned keys is written")
-	cmd.Flags().StringVar(&outputWalletMetaLoc, "host-meta-loc", "assigned_wallet_meta", "Path of the metadata of the output wallet for the host, where keymanageropts.json, secrets dir, acc_path_to_pub.json are written")
-
-	cmd.Flags().StringVar(&outputWalletName, "host-wallet-name", "Assigned", "Name of the wallet, applicable if e.g. an ethdo wallet type.")
+	cmd.Flags().StringVar(&outputDataPath, "out-loc", "assigned_data", "Path of the output data for the host, where wallets, keys, secrets dir, etc. are written")
 
 	cmd.Flags().StringVar(&sourceWalletLoc, "source-wallet-loc", "", "Path of the source wallet, empty to use default")
 	cmd.Flags().StringVar(&sourceWalletName, "source-wallet-name", "Validators", "Name of the wallet to look for keys in")
@@ -394,7 +414,7 @@ func assignCommand() *cobra.Command {
 	return cmd
 }
 
-func assignVals(wallet types.Wallet, output WalletOutput, outputWalletName string,
+func assignVals(wallet types.Wallet, output WalletOutput,
 	accountPasswords AccountPasswords, assignmentsPath string, hostname string, n uint64, addAssignments bool) error {
 
 	va, err := LoadAssignments(assignmentsPath)
@@ -504,19 +524,19 @@ func assignVals(wallet types.Wallet, output WalletOutput, outputWalletName strin
 			if err != nil {
 				return fmt.Errorf("cannot find wallet account for assignment, id: %s, pub: %s", entry.AccountID.UUID.String(), entry.Pubkey)
 			}
+			if err := a.Unlock([]byte(password)); err != nil {
+				return fmt.Errorf("failed to unlock priv key for account %s with pubkey %s: %v", a.ID().String(), entry.Pubkey, err)
+			}
 			aPriv, ok := a.(types.AccountPrivateKeyProvider)
 			if !ok {
 				return fmt.Errorf("cannot get priv key for account %s with pubkey %s", a.ID().String(), entry.Pubkey)
-			}
-			if err := a.Unlock([]byte(password)); err != nil {
-				return fmt.Errorf("failed to unlock priv key for account %s with pubkey %s: %v", a.ID().String(), entry.Pubkey, err)
 			}
 			priv, err := aPriv.PrivateKey()
 			if err != nil {
 				return fmt.Errorf("cannot read priv key for account %s with pubkey %s: %v", a.ID().String(), entry.Pubkey, err)
 			}
 			// account names must be prefixed with wallet name
-			if err := output.InsertAccount(outputWalletName+"/"+entry.Pubkey, priv); err != nil {
+			if err := output.InsertAccount(priv); err != nil {
 				if err.Error() == fmt.Sprintf("account with name \"%s\" already exists", entry.Pubkey) {
 					fmt.Printf("Account with pubkey %s already exists in output wallet, skipping it\n", entry.Pubkey)
 				} else {
