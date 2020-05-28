@@ -8,7 +8,7 @@ then
     [[ "$0" = "$BASH_SOURCE" ]] && exit 1 || return 1
 fi
 
-walletbasedir="./wallets/experiment"
+walletbasedir="./wallets/experiment2"
 account_passwords_csv_file="./wallets/experiment/val_passwords.csv"
 
 validator_wallet_name="Validators"
@@ -18,8 +18,8 @@ account_start=1
 account_end=10
 
 # TODO: hd type wallet has an ethdo problem with directory location
-#wallet_type="hierarchical deterministic"
-wallet_type="non-deterministic"
+wallet_type="hierarchical deterministic"
+#wallet_type="non-deterministic"
 
 mkdir -p "$walletbasedir"
 
