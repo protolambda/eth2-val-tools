@@ -187,9 +187,9 @@ func NewKeyEntry(priv e2types.PrivateKey) (*KeyEntry, error) {
 	// Convert it to human readable characters, to keep it manageable
 	passphrase := base64.URLEncoding.EncodeToString(pass[:])
 	return &KeyEntry{
-		KeyFile:    KeyFile{
+		KeyFile: KeyFile{
 			id:        uuid.New(),
-			name:      "val_"+hex.EncodeToString(priv.PublicKey().Marshal()),
+			name:      "val_" + hex.EncodeToString(priv.PublicKey().Marshal()),
 			publicKey: priv.PublicKey(),
 			secretKey: priv,
 		},
@@ -233,8 +233,8 @@ func (ww *WalletWriter) InsertAccount(priv e2types.PrivateKey) error {
 }
 
 type KeyManagerOpts struct {
-	Location string `json:"location"`
-	Accounts []string `json:"accounts"`
+	Location    string   `json:"location"`
+	Accounts    []string `json:"accounts"`
 	Passphrases []string `json:"passphrases"`
 }
 
@@ -492,10 +492,10 @@ func assignVals(wallet types.Wallet, output WalletOutput,
 					assignedPubkeys[pubkey] = struct{}{}
 
 					newAssignedToHost = append(newAssignedToHost, ValidatorAssignEntry{
-						Pubkey:    pubkey,
-						Host:      hostname,
-						Time:      assignmentTime,
-						AccountID: AccountID{a.ID()},
+						Pubkey:            pubkey,
+						Host:              hostname,
+						Time:              assignmentTime,
+						AccountID:         AccountID{a.ID()},
 						SourceAccountName: name,
 					})
 					toAssign -= 1
