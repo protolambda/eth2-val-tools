@@ -60,9 +60,10 @@ Lighthouse is key-centric, no wallets involved. Following EIP 2335.
 The output is:
 
 - `secrets` directory, containing one file per validator. Named after the pubkey (hex-encoded, `0x` prefix).
- Each file contains the passphrase for the `key.json` of the validator.
-- `keys` directory, containing one directory per validator. Named after the pubkey (hex-encoded, `0x` prefix).
- Each directory contains a `key.json`, an EIP 2335 keystore file, with `path` field set to empty string.
+ Each file contains the passphrase for the `voting-keystore.json` of the validator.
+- `keys` directory (equivalent of `.lighthouse/validators`, containing one directory per validator. Named after the pubkey (hex-encoded, `0x` prefix).
+ Each directory contains a `voting-keystore.json`, an EIP 2335 keystore file, with `path` field set to empty string.
+ The `voting-keystore.json` name is a requirement of Lighthouse.
 
 #### Teku
 
