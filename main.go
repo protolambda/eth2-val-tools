@@ -199,7 +199,8 @@ func NewKeyEntry(priv e2types.PrivateKey) (*KeyEntry, error) {
 
 func (ke *KeyEntry) MarshalJSON() ([]byte, error) {
 	data := make(map[string]interface{})
-	data["name"] = ke.name
+	// TODO: ligthouse can't handle this field, should it be here?
+	//data["name"] = ke.name
 	encryptor := keystorev4.New(keystorev4.WithCipher("pbkdf2"))
 	var err error
 	data["crypto"], err = encryptor.Encrypt(ke.secretKey.Marshal(), []byte(ke.passphrase))
@@ -280,7 +281,8 @@ func (ww *WalletWriter) WriteMetaOutputs(filepath string, keyMngWalletLoc string
 	if err := os.MkdirAll(filepath, os.ModePerm); err != nil {
 		return err
 	}
-	keyfileName := "key.json"
+	// What lighthouse requires as file name
+	keyfileName := "voting-keystore.json"
 	keyfilesPath := path.Join(filepath, "keys")
 	// For all: write JSON keystore files, each in their own directory (lighthouse requirement)
 	for _, e := range ww.entries {
