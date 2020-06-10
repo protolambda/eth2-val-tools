@@ -37,8 +37,8 @@ eth1_network=goerli
 # Iterate through lines, each is a json of the deposit data and some metadata
 while read x; do
    # TODO: check validity of deposit before sending it
-   account_name = "$(echo "$x" | jq '.account')"
-   pubkey = "$(echo "$x" | jq '.pubkey')"
+   account_name="$(echo "$x" | jq '.account')"
+   pubkey="$(echo "$x" | jq '.pubkey')"
    echo "Sending deposit for validator $account_name $pubkey"
    ~/go/bin/ethereal beacon deposit \
       --address="$DEPOSIT_CONTRACT_ADDRESS" \
