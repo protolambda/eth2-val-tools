@@ -8,13 +8,14 @@ then
     [[ "$0" = "$BASH_SOURCE" ]] && exit 1 || return 1
 fi
 
-walletbasedir="./wallets/experiment"
-account_passwords_csv_file="./wallets/experiment/val_passwords.csv"
+walletbasedir=$WALLET_DIR
+account_passwords_csv_file=$ACCOUNT_PASSWORDS_LOC
 
 withdrawal_wallet_name="Withdrawal"
 withdrawal_account_name="Primary"
 
-forkversion="0x00000113"
+# E.g. "0x00000113" for witti testnet
+forkversion=$FORK_VERSION
 
 amount="32Ether"
 

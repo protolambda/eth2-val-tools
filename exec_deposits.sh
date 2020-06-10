@@ -8,11 +8,15 @@ then
     [[ "$0" = "$BASH_SOURCE" ]] && exit 1 || return 1
 fi
 
-contractaddress="0x42cc0FcEB02015F145105Cf6f19F90e9BEa76558"
+# DEPOSIT_CONTRACT_ADDRESS="0x42cc0FcEB02015F145105Cf6f19F90e9BEa76558"
+if [[ -z "${DEPOSIT_CONTRACT_ADDRESS}" ]]; then
+  echo "need DEPOSIT_CONTRACT_ADDRESS environment var"
+  exit 1 || return 1
+fi
 
 # Eth1
-#ETH1_FROM_ADDR="0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-#ETH1_FROM_PRIV="0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+# ETH1_FROM_ADDR="0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+# ETH1_FROM_PRIV="0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 
 if [[ -z "${ETH1_FROM_ADDR}" ]]; then
   echo "need ETH1_FROM_ADDR environment var"
@@ -37,7 +41,7 @@ while read x; do
    pubkey = "$(echo "$x" | jq '.pubkey')"
    echo "Sending deposit for validator $account_name $pubkey"
    ~/go/bin/ethereal beacon deposit \
-      --address="$contractaddress" \
+      --address="$DEPOSIT_CONTRACT_ADDRESS" \
       --force=$force_deposit \
       --network=$eth1_network \
       --data="$x" \

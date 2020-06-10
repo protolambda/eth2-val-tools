@@ -8,15 +8,17 @@ then
     [[ "$0" = "$BASH_SOURCE" ]] && exit 1 || return 1
 fi
 
-walletbasedir="./wallets/experiment"
+# E.g. "./wallets/witti"
+walletbasedir=$WALLET_DIR
 
-wallet_type="non-deterministic"
+wallet_type="hierarchical deterministic"
+#wallet_type="non-deterministic"
 
 withdrawal_wallet_name="Withdrawal"
 withdrawal_account_name="Primary"
 
-withdrawal_wallet_passphrase="lmaolmao"
-withdrawal_account_passphrase="lmaolmao"
+withdrawal_wallet_passphrase=$WITHRAWAL_WALLET_PASSWORD
+withdrawal_account_passphrase=$WITHRAWAL_ACC_PASSWORD
 
 mkdir -p "$walletbasedir"
 
