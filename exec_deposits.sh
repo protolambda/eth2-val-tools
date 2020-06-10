@@ -27,7 +27,7 @@ if [[ -z "${ETH1_FROM_PRIV}" ]]; then
   exit 1 || return 1
 fi
 
-deposit_datas_file="deposit_datas.txt"
+deposit_datas_file=$DEPOSIT_DATAS_FILE
 
 # Required for testnets that are not recognized by ethdo
 force_deposit=false

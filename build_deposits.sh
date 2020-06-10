@@ -19,7 +19,7 @@ forkversion=$FORK_VERSION
 
 amount="32Ether"
 
-deposit_datas_file="deposit_datas.txt"
+deposit_datas_file=$DEPOSIT_DATAS_FILE
 
 INPUT=$account_passwords_csv_file
 OLDIFS=$IFS
