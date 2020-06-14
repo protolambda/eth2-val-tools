@@ -252,8 +252,7 @@ func (ww *WalletWriter) buildPrysmWallet(outPath string, keyMngWalletLoc string)
 	_ = outWal.Unlock(nil)
 	outWallet := outWal.(types.WalletAccountImporter)
 	for _, e := range ww.entries {
-		name := fmt.Sprintf("%s/%s", walletName, e.name)
-		if _, err := outWallet.ImportAccount(name, e.secretKey.Marshal(), []byte(e.passphrase)); err != nil {
+		if _, err := outWallet.ImportAccount(e.name, e.secretKey.Marshal(), []byte(e.passphrase)); err != nil {
 			return err
 		}
 	}
@@ -261,9 +260,11 @@ func (ww *WalletWriter) buildPrysmWallet(outPath string, keyMngWalletLoc string)
 	// write a json configuration to specify accounts and passwords
 	keyManagerOpts := KeyManagerOpts{Location: keyMngWalletLoc}
 	for _, e := range ww.entries {
-		keyManagerOpts.Accounts = append(keyManagerOpts.Accounts, fmt.Sprintf("%s/%s", walletName, e.name))
 		keyManagerOpts.Passphrases = append(keyManagerOpts.Passphrases, e.passphrase)
 	}
+	// TODO: temporary hack, we should change to keystore-centric approach.
+	// The prysm account matching of ethdo account names seems broken, use just the wallet name as a catch-all instead.
+	keyManagerOpts.Accounts = append(keyManagerOpts.Accounts, walletName)
 	optsData, err := json.Marshal(&keyManagerOpts)
 	if err != nil {
 		return err
