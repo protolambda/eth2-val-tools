@@ -2,6 +2,23 @@
 
 *Warning: Use at your own risk, this is all very experimental*
 
+## Deposits
+
+Requirements:
+- Install [`ethdo`](https://github.com/wealdtech/ethdo)
+- Install [`ethereal`](https://github.com/wealdtech/ethereal/)
+
+Steps:
+- `. my_config.sh`: central configuration with environment vars, see `example_config.sh` for an example
+- `. make_withdrawal_wallet.sh`: prepare a withdrawal wallet, single account is re-used for each deposit, good enough for testing.
+- `. make_validator_wallet.sh`: builds wallet + passwords file
+- `. build_deposits.sh`: reads passwords file, builds deposit data for each account in it
+- `. exec_deposits.sh`: executes deposit datas, making eth1 transactions
+
+Warning: If you run any of the scripts multiple times, beware that it appends to files and may cause duplicates.
+
+For automatic validator assignment, tracking and deployment, use the `assign` command of the Go module in this repo. 
+
 ## Commands
 
 ### `assign`
