@@ -14,11 +14,12 @@ account_passwords_csv_file=$ACCOUNT_PASSWORDS_LOC
 validator_wallet_name="Validators"
 validator_wallet_passphrase=$VALIDATORS_WALLET_PASSWORD
 
-account_start=1
-account_end=10
+account_start=$ACC_START_INDEX
+account_end=$ACC_END_INDEX
 
-wallet_type="hierarchical deterministic"
-#wallet_type="non-deterministic"
+# HD wallet work in progress, need to update tooling to support wallet-passwords.
+#wallet_type="hierarchical deterministic"
+wallet_type="non-deterministic"
 
 mkdir -p "$walletbasedir"
 

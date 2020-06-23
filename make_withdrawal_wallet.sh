@@ -11,8 +11,8 @@ fi
 # E.g. "./wallets/witti"
 walletbasedir=$WALLET_DIR
 
-wallet_type="hierarchical deterministic"
-#wallet_type="non-deterministic"
+#wallet_type="hierarchical deterministic"
+wallet_type="non-deterministic"
 
 withdrawal_wallet_name="Withdrawal"
 withdrawal_account_name="Primary"
