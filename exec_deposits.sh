@@ -30,7 +30,7 @@ fi
 deposit_datas_file=$DEPOSIT_DATAS_FILE
 
 # Required for testnets that are not recognized by ethdo
-force_deposit=false
+force_deposit=$FORCE_DEPOSIT
 
 eth1_network=goerli
 

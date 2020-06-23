@@ -28,3 +28,6 @@ export DEPOSIT_DATAS_FILE="./wallets/altona/deposit_datas.txt"
 # *change these*
 export ETH1_FROM_ADDR="0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 export ETH1_FROM_PRIV="0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+
+# The deposit contract of Altona is not recognized, so we're forcing deposits through anyway
+export FORCE_DEPOSIT=true
