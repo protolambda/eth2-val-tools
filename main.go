@@ -17,6 +17,7 @@ import (
 	keystorev4 "github.com/wealdtech/go-eth2-wallet-encryptor-keystorev4"
 	filesystem "github.com/wealdtech/go-eth2-wallet-store-filesystem"
 	types "github.com/wealdtech/go-eth2-wallet-types/v2"
+	"gopkg.in/yaml.v2"
 	"io"
 	"io/ioutil"
 	"os"
@@ -275,7 +276,12 @@ func (ww *WalletWriter) buildPrysmWallet(outPath string, keyMngWalletLoc string)
 	return nil
 }
 
-func (ww *WalletWriter) WriteMetaOutputs(filepath string, keyMngWalletLoc string) error {
+type TekuConfig struct {
+	ValidatorsKeyFiles []string `yaml:"validators-key-files"`
+	ValidatorsPasswordFiles []string `yaml:"validators-key-password-files"`
+}
+
+func (ww *WalletWriter) WriteMetaOutputs(filepath string, keyMngWalletLoc string, configBasePath string) error {
 	if _, err := os.Stat(filepath); !os.IsNotExist(err) {
 		return errors.New("output for assignments already exists! Aborting")
 	}
@@ -312,7 +318,20 @@ func (ww *WalletWriter) WriteMetaOutputs(filepath string, keyMngWalletLoc string
 		}
 	}
 
-	// For Teku: a list of pubkeys. Used to find the keys and secrets to start a client with.
+	// For Teku: a yaml config file pointing to each key and secret
+	tekuConfig := TekuConfig{
+		ValidatorsKeyFiles:      make([]string, 0), // we don't want null arrays
+		ValidatorsPasswordFiles: make([]string, 0),
+	}
+	for _, e := range ww.entries {
+		tekuConfig.ValidatorsKeyFiles = append(tekuConfig.ValidatorsKeyFiles, path.Join(configBasePath, "keys", e.PubHex(), keyfileName))
+		tekuConfig.ValidatorsPasswordFiles = append(tekuConfig.ValidatorsPasswordFiles, path.Join(configBasePath, "secrets", e.PubHex()))
+	}
+	tekuConfData, err := yaml.Marshal(&tekuConfig)
+	if err := ioutil.WriteFile(path.Join(filepath, "teku_validators_config.yaml"), tekuConfData, 0644); err != nil {
+		return err
+	}
+	// In general: a list of pubkeys.
 	pubkeys := make([]string, 0)
 	for _, e := range ww.entries {
 		pubkeys = append(pubkeys, e.PubHex())
@@ -365,6 +384,7 @@ func ReadAccountPasswordsFile(filePath string) (AccountPasswords, error) {
 func assignCommand() *cobra.Command {
 
 	var keyMngWalletLoc string
+	var configBasePath string
 
 	var outputDataPath string
 
@@ -399,10 +419,11 @@ func assignCommand() *cobra.Command {
 
 			ww := &WalletWriter{}
 			checkErr(assignVals(wal, ww, accountPasswords, assignmentsLoc, hostname, count, addCount))
-			checkErr(ww.WriteMetaOutputs(outputDataPath, keyMngWalletLoc))
+			checkErr(ww.WriteMetaOutputs(outputDataPath, keyMngWalletLoc, configBasePath))
 		},
 	}
 	cmd.Flags().StringVar(&keyMngWalletLoc, "key-man-loc", "", "Location to write to the 'location' field in the keymanager_opts.json file (Prysm only)")
+	cmd.Flags().StringVar(&configBasePath, "config-base-path", "/data", "Location to use as base in the config file (Teku only)")
 
 	cmd.Flags().StringVar(&outputDataPath, "out-loc", "assigned_data", "Path of the output data for the host, where wallets, keys, secrets dir, etc. are written")
 
