@@ -277,7 +277,7 @@ func (ww *WalletWriter) buildPrysmWallet(outPath string, keyMngWalletLoc string)
 }
 
 type TekuConfig struct {
-	ValidatorsKeyFiles []string `yaml:"validators-key-files"`
+	ValidatorsKeyFiles      []string `yaml:"validators-key-files"`
 	ValidatorsPasswordFiles []string `yaml:"validators-key-password-files"`
 }
 
@@ -302,6 +302,20 @@ func (ww *WalletWriter) WriteMetaOutputs(filepath string, keyMngWalletLoc string
 			return err
 		}
 		if err := ioutil.WriteFile(path.Join(keyDirPath, keyfileName), dat, 0644); err != nil {
+			return err
+		}
+	}
+	// And all keystores, but all in the same directory (nimbus)
+	allkeyfilesPath := path.Join(filepath, "allkeys")
+	if err := os.MkdirAll(allkeyfilesPath, os.ModePerm); err != nil {
+		return err
+	}
+	for _, e := range ww.entries {
+		dat, err := e.MarshalJSON()
+		if err != nil {
+			return err
+		}
+		if err := ioutil.WriteFile(path.Join(allkeyfilesPath, e.PubHex()+".json"), dat, 0644); err != nil {
 			return err
 		}
 	}
