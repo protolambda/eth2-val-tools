@@ -338,7 +338,7 @@ func (ww *WalletWriter) WriteMetaOutputs(filepath string, keyMngWalletLoc string
 		ValidatorsPasswordFiles: make([]string, 0),
 	}
 	for _, e := range ww.entries {
-		tekuConfig.ValidatorsKeyFiles = append(tekuConfig.ValidatorsKeyFiles, path.Join(configBasePath, "keys", e.PubHex(), keyfileName))
+		tekuConfig.ValidatorsKeyFiles = append(tekuConfig.ValidatorsKeyFiles, path.Join(configBasePath, "keys", e.PubHex()+".json"))
 		tekuConfig.ValidatorsPasswordFiles = append(tekuConfig.ValidatorsPasswordFiles, path.Join(configBasePath, "secrets", e.PubHex()))
 	}
 	tekuConfData, err := yaml.Marshal(&tekuConfig)
