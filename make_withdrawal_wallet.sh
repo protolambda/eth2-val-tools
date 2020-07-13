@@ -24,7 +24,7 @@ mkdir -p "$walletbasedir"
 
 echo "Creating withdrawal wallet: $withdrawal_wallet_name in $walletbasedir"
 
-~/go/bin/ethdo wallet create \
+$GOPATH/bin/ethdo wallet create \
    --type="$wallet_type" \
    --basedir="$walletbasedir" \
    --wallet="$withdrawal_wallet_name" \
@@ -33,7 +33,7 @@ echo "Creating withdrawal wallet: $withdrawal_wallet_name in $walletbasedir"
 echo "Creating withdrawal account: $withdrawal_wallet_name/$withdrawal_account_name"
 
 # Create single withdrawal account
-~/go/bin/ethdo account create \
+$GOPATH/bin/ethdo account create \
    --basedir="$walletbasedir" \
    --account="$withdrawal_wallet_name/$withdrawal_account_name" \
    --walletpassphrase="$withdrawal_wallet_passphrase" \

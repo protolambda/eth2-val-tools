@@ -26,7 +26,7 @@ mkdir -p "$walletbasedir"
 echo "Creating validator wallet"
 
 # Create wallet
-~/go/bin/ethdo wallet create \
+$GOPATH/bin/ethdo wallet create \
    --type="$wallet_type" \
    --debug=true \
    --basedir="$walletbasedir" \
@@ -41,7 +41,7 @@ do
    # Generate a password for the account. A base64 string. (and remove the newline from the output)
    account_passphrase=$(openssl rand -base64 32 | tr -d '\n')
 
-   ~/go/bin/ethdo account create \
+   $GOPATH/bin/ethdo account create \
       --basedir="$walletbasedir" \
       --account="$account_name" \
       --walletpassphrase="$validator_wallet_passphrase" \
