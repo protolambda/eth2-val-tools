@@ -1,5 +1,4 @@
 #!/bin/bash
-
 echo "USE AT YOUR OWN RISK"
 read -p "Are you sure? " -n 1 -r
 echo
@@ -40,9 +39,9 @@ while read x; do
    account_name="$(echo "$x" | jq '.account')"
    pubkey="$(echo "$x" | jq '.pubkey')"
    echo "Sending deposit for validator $account_name $pubkey"
-   ~/go/bin/ethereal beacon deposit \
+   ethereal beacon deposit \
+      --allow-unknown-contract=$force_deposit \
       --address="$DEPOSIT_CONTRACT_ADDRESS" \
-      --force=$force_deposit \
       --network=$eth1_network \
       --data="$x" \
       --from="$ETH1_FROM_ADDR" \

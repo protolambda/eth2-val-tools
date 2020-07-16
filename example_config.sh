@@ -1,5 +1,6 @@
 #!/bin/bash
 
+export VALIDATORS_WALLET_NAME="Validators"
 # Warning: bad open passwords, use something else
 # Do not have weak plain passwords like this open for non-test environments.
 # *change these*
