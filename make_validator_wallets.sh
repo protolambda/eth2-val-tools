@@ -11,7 +11,7 @@ fi
 walletbasedir=$WALLET_DIR
 account_passwords_csv_file=$ACCOUNT_PASSWORDS_LOC
 
-validator_wallet_name="Validators"
+validator_wallet_name="$VALIDATORS_WALLET_NAME"
 validator_wallet_passphrase=$VALIDATORS_WALLET_PASSWORD
 
 account_start=$ACC_START_INDEX
