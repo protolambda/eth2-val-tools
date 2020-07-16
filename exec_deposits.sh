@@ -39,7 +39,7 @@ while read x; do
    account_name="$(echo "$x" | jq '.account')"
    pubkey="$(echo "$x" | jq '.pubkey')"
    echo "Sending deposit for validator $account_name $pubkey"
-   $GOPATH/bin/ethereal beacon deposit \
+   ethereal beacon deposit \
       --allow-unknown-contract=$force_deposit \
       --address="$DEPOSIT_CONTRACT_ADDRESS" \
       --network=$eth1_network \
