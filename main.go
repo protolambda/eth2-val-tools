@@ -411,6 +411,8 @@ func assignCommand() *cobra.Command {
 	var count uint64
 	var addCount bool
 
+	var walletName string
+
 	cmd := &cobra.Command{
 		Use:   "assign",
 		Short: "Assign `n` available validators to `hostname`. If --add is true, it will add `n` assigned validators, instead of filling up to `n` total assigned to the host",
@@ -421,7 +423,7 @@ func assignCommand() *cobra.Command {
 			checkErr(err, "could not create scratch wallet from mnemonic")
 
 			ww := &WalletWriter{}
-			checkErr(assignVals(context.Background(), wallet.(types.WalletAccountByNameProvider), wallet.Name(),
+			checkErr(assignVals(context.Background(), wallet.(types.WalletAccountByNameProvider), walletName,
 				accountMin, accountMax, ww, assignmentsLoc, hostname, count, addCount), "failed to assign validators")
 			checkErr(ww.WriteOutputs(outputDataPath, keyMngWalletLoc, configBasePath), "failed to write output")
 		},
@@ -440,6 +442,7 @@ func assignCommand() *cobra.Command {
 	cmd.Flags().StringVar(&hostname, "hostname", "morty", "Unique name of the remote host to assign validators to")
 	cmd.Flags().Uint64VarP(&count, "count", "n", 0, "Amount of validators to assign")
 	cmd.Flags().BoolVar(&addCount, "add", false, "If the assignment should add to the existing assignment")
+	cmd.Flags().StringVar(&walletName, "wallet-name", "unknown imported wallet", "Name of the wallet, to tag accounts with in the assignments file")
 
 	return cmd
 }

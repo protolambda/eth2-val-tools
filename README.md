@@ -40,6 +40,8 @@ You can then make assignments of `n` validators, generating a wallet to use on t
 
 The sourced accounts are from a validators-mnemonic and a specified range of accounts.
 
+See `example_assign.sh` for an example.
+
 ```
 Assign `n` available validators to `hostname`. If --add is true, it will add `n` assigned validators, instead of filling up to `n` total assigned to the host
 
@@ -58,7 +60,7 @@ Flags:
       --source-max uint           Maximum validator index in HD path range (excl.)
       --source-min uint           Minimum validator index in HD path range (incl.)
       --source-mnemonic string    The validators mnemonic to source account keys from
-
+      --wallet-name string        Name of the wallet, to tag accounts with in the assignments file (default "unknown imported wallet")
 ```
 
 ### `mnemonic`
