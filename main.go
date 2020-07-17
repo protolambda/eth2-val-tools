@@ -11,6 +11,9 @@ import (
 	filelock "github.com/MichaelS11/go-file-lock"
 	"github.com/google/uuid"
 	hbls "github.com/herumi/bls-eth-go-binary/bls"
+	"github.com/protolambda/zrnt/eth2/beacon"
+	"github.com/protolambda/zrnt/eth2/util/hashing"
+	"github.com/protolambda/zrnt/eth2/util/ssz"
 	"github.com/spf13/cobra"
 	"github.com/tyler-smith/go-bip39"
 	e2types "github.com/wealdtech/go-eth2-types/v2"
@@ -354,6 +357,43 @@ func (ww *WalletWriter) WriteOutputs(filepath string, keyMngWalletLoc string, co
 	return nil
 }
 
+func makeCheckErr(cmd *cobra.Command) func(err error, msg string) {
+	return func(err error, msg string) {
+		if err != nil {
+			if msg != "" {
+				err = fmt.Errorf("%s: %v", msg, err)
+			}
+			cmd.PrintErr(err)
+			os.Exit(1)
+		}
+	}
+}
+
+func walletFromMnemonic(mnemonic string) (types.Wallet, error) {
+	store := scratch.New()
+	encryptor := keystorev4.New()
+
+	var seed []byte
+	seed, err := bip39.MnemonicToByteArray(mnemonic)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode seed: %v", err)
+	}
+	// Strip checksum; last byte.
+	seed = seed[:len(seed)-1]
+	if len(seed) != 32 {
+		return nil, fmt.Errorf("seed must have 24 words, got %d, expected %d bytes", len(seed), 32)
+	}
+	wallet, err := hd.CreateWalletFromSeed(context.Background(), "imported wallet", []byte{}, store, encryptor, seed)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create scratch wallet from seed: %v", err)
+	}
+	err = wallet.(types.WalletLocker).Unlock(context.Background(), []byte{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to unlock scratch wallet: %v", err)
+	}
+	return wallet, nil
+}
+
 func assignCommand() *cobra.Command {
 
 	var keyMngWalletLoc string
@@ -379,34 +419,13 @@ func assignCommand() *cobra.Command {
 		Short: "Assign `n` available validators to `hostname`. If --add is true, it will add `n` assigned validators, instead of filling up to `n` total assigned to the host",
 		Args:  cobra.NoArgs,
 		Run: func(cmd *cobra.Command, args []string) {
-			checkErr := func(err error, msg string) {
-				if err != nil {
-					if msg != "" {
-						err = fmt.Errorf("%s: %v", msg, err)
-					}
-					cmd.PrintErr(err)
-					os.Exit(1)
-				}
-			}
+			checkErr := makeCheckErr(cmd)
 			var wallet types.Wallet
+			var err error
 			if sourceMnemonic != "" {
-				store := scratch.New()
-				encryptor := keystorev4.New()
-
-				var seed []byte
-				seed, err := bip39.MnemonicToByteArray(sourceMnemonic)
-				checkErr(err, "failed to decode seed")
-				// Strip checksum; last byte.
-				seed = seed[:len(seed)-1]
-				if len(seed) != 32 {
-					checkErr(fmt.Errorf("got %d, expected %d bytes", len(seed), 32), "Seed must have 24 words")
-				}
-				wallet, err = hd.CreateWalletFromSeed(context.Background(), "imported wallet", []byte{}, store, encryptor, seed)
-				checkErr(err, "failed to create scratch wallet from seed")
-				err = wallet.(types.WalletLocker).Unlock(context.Background(), []byte{})
-				checkErr(err, "failed to unlock scratch wallet")
+				wallet, err = walletFromMnemonic(sourceMnemonic)
+				checkErr(err, "could not create scratch wallet from mnemonic")
 			} else {
-				var err error
 				wallet, err = e2wallet.OpenWallet(sourceWalletName, e2wallet.WithStore(storeWithOptions(sourceWalletPass, sourceWalletLoc)))
 				checkErr(err, "could not open source wallet")
 				err = wallet.(types.WalletLocker).Unlock(context.Background(), []byte(sourceWalletPass))
@@ -429,8 +448,8 @@ func assignCommand() *cobra.Command {
 	cmd.Flags().StringVar(&sourceWalletPass, "source-wallet-pass", "", "Pass for the HD source wallet itself. Empty to disable")
 	cmd.Flags().StringVar(&sourceMnemonic, "source-mnemonic", "", "Alternative to source wallet. Empty to disable")
 
-	cmd.Flags().Uint64Var(&count, "source-min", 0, "Minimum validator index in HD path range (incl.)")
-	cmd.Flags().Uint64Var(&count, "source-max", 0, "Maximum validator index in HD path range (excl.)")
+	cmd.Flags().Uint64Var(&accountMin, "source-min", 0, "Minimum validator index in HD path range (incl.)")
+	cmd.Flags().Uint64Var(&accountMax, "source-max", 0, "Maximum validator index in HD path range (excl.)")
 
 	cmd.Flags().StringVar(&assignmentsLoc, "assignments", "assignments.json", "Path of the current assignments to adjust")
 	cmd.Flags().StringVar(&hostname, "hostname", "morty", "Unique name of the remote host to assign validators to")
@@ -600,22 +619,100 @@ func createMnemonicCmd() *cobra.Command {
 		Short: "Create a random mnemonic",
 		Args:  cobra.NoArgs,
 		Run: func(cmd *cobra.Command, args []string) {
-			checkErr := func(err error, msg string) {
-				if err != nil {
-					if msg != "" {
-						err = fmt.Errorf("%s: %v", msg, err)
-					}
-					cmd.PrintErr(err)
-					os.Exit(1)
-				}
-			}
+			checkErr := makeCheckErr(cmd)
 			entropy, err := bip39.NewEntropy(256)
 			checkErr(err, "cannot get 256 bits of entropy")
 			mnemonic, err := bip39.NewMnemonic(entropy)
 			checkErr(err, "cannot create mnemonic")
-			cmd.Println(mnemonic)
+			cmd.Print(mnemonic)
 		},
 	}
+	return cmd
+}
+
+func createDepositDatasCmd() *cobra.Command {
+	var accountMin uint64
+	var accountMax uint64
+
+	var amountGwei uint64
+
+	var forkVersion string
+
+	var validatorsMnemonic string
+	var withdrawalsMnemonic string
+
+	cmd := &cobra.Command{
+		Use:   "deposit-data",
+		Short: "Create deposit data for the given range of validators. 1 json-encoded deposit data per line.",
+		Args:  cobra.NoArgs,
+		Run: func(cmd *cobra.Command, args []string) {
+			checkErr := makeCheckErr(cmd)
+			var genesisForkVersion beacon.Version
+			checkErr(genesisForkVersion.UnmarshalText([]byte(forkVersion)), "cannot decode fork version")
+			validators, err := walletFromMnemonic(validatorsMnemonic)
+			checkErr(err, "failed to load validators mnemonic")
+			valAccs := validators.(types.WalletAccountByNameProvider)
+			withdrawals, err := walletFromMnemonic(withdrawalsMnemonic)
+			checkErr(err, "failed to load validators mnemonic")
+			withdrawlAccs := withdrawals.(types.WalletAccountByNameProvider)
+			ctx := context.Background()
+			for i := accountMin; i < accountMax; i++ {
+				accPath := validatorKeyName(i)
+				val, err := valAccs.AccountByName(ctx, accPath)
+				checkErr(err, fmt.Sprintf("could not get validator key %d", i))
+
+				var pub beacon.BLSPubkey
+				copy(pub[:], val.PublicKey().Marshal())
+
+				withdr, err := withdrawlAccs.AccountByName(ctx, accPath)
+				checkErr(err, fmt.Sprintf("could not get withdrawl key %d", i))
+
+				var withdrPub beacon.BLSPubkey
+				copy(withdrPub[:], withdr.PublicKey().Marshal())
+				withdrCreds := hashing.Hash(withdrPub[:])
+				withdrCreds[0] = beacon.BLS_WITHDRAWAL_PREFIX
+
+				data := beacon.DepositData{
+					Pubkey:                pub,
+					WithdrawalCredentials: withdrCreds,
+					Amount:                beacon.Gwei(amountGwei),
+					Signature:             beacon.BLSSignature{},
+				}
+				msgRoot := ssz.HashTreeRoot(data.ToMessage(), beacon.DepositMessageSSZ)
+				valPriv, err := val.(types.AccountPrivateKeyProvider).PrivateKey(ctx)
+				checkErr(err, "cannot get validator private key")
+				var secKey hbls.SecretKey
+				checkErr(secKey.Deserialize(valPriv.Marshal()), "cannot convert validator priv key")
+
+				dom := beacon.ComputeDomain(beacon.DOMAIN_DEPOSIT, genesisForkVersion, beacon.Root{})
+				msg := beacon.ComputeSigningRoot(msgRoot, dom)
+				sig := secKey.SignHash(msg[:])
+				copy(data.Signature[:], sig.Serialize())
+
+				dataRoot := ssz.HashTreeRoot(&data, beacon.DepositDataSSZ)
+				jsonData := map[string]interface{}{
+					"account":                accPath,
+					"pubkey":                 hex.EncodeToString(data.Pubkey[:]),
+					"withdrawal_credentials": hex.EncodeToString(data.WithdrawalCredentials[:]),
+					"signature":              hex.EncodeToString(data.Signature[:]),
+					"value":                  data.Amount,
+					"deposit_data_root":      hex.EncodeToString(dataRoot[:]),
+					"version":                1, // ethereal cli requirement
+				}
+				jsonStr, err := json.Marshal(jsonData)
+				checkErr(err, "could not encode deposit data to json")
+				cmd.Println(string(jsonStr))
+			}
+		},
+	}
+
+	cmd.Flags().StringVar(&validatorsMnemonic, "validators-mnemonic", "", "Mnemonic to use for validators.")
+	cmd.Flags().StringVar(&withdrawalsMnemonic, "withdrawals-mnemonic", "", "Mnemonic to use for withdrawals. Withdrawal accounts are assumed to have matching paths with validators.")
+	cmd.Flags().Uint64Var(&accountMin, "source-min", 0, "Minimum validator index in HD path range (incl.)")
+	cmd.Flags().Uint64Var(&accountMax, "source-max", 0, "Maximum validator index in HD path range (excl.)")
+	cmd.Flags().Uint64Var(&amountGwei, "amount", uint64(beacon.MAX_EFFECTIVE_BALANCE), "Amount to deposit, in Gwei")
+	cmd.Flags().StringVar(&forkVersion, "fork-version", "", "Fork version, e.g. 0x11223344")
+
 	return cmd
 }
 
@@ -630,7 +727,9 @@ func main() {
 	}
 	rootCmd.AddCommand(assignCommand())
 	rootCmd.AddCommand(createMnemonicCmd())
-
+	rootCmd.AddCommand(createDepositDatasCmd())
+	rootCmd.SetOut(os.Stdout)
+	rootCmd.SetErr(os.Stderr)
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}
