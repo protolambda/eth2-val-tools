@@ -8,33 +8,27 @@ then
     [[ "$0" = "$BASH_SOURCE" ]] && exit 1 || return 1
 fi
 
-# E.g. "./wallets/witti"
-walletbasedir=$WALLET_DIR
+mkdir -p "$WALLET_DIR"
 
-#wallet_type="hierarchical deterministic"
-wallet_type="non-deterministic"
+echo "Creating withdrawal wallet"
 
-withdrawal_wallet_name="Withdrawal"
-withdrawal_account_name="Primary"
-
-withdrawal_wallet_passphrase=$WITHRAWAL_WALLET_PASSWORD
-withdrawal_account_passphrase=$WITHRAWAL_ACC_PASSWORD
-
-mkdir -p "$walletbasedir"
-
-echo "Creating withdrawal wallet: $withdrawal_wallet_name in $walletbasedir"
-
+# Create wallet
 ~/go/bin/ethdo wallet create \
-   --type="$wallet_type" \
-   --basedir="$walletbasedir" \
-   --wallet="$withdrawal_wallet_name" \
-   --walletpassphrase="$withdrawal_wallet_passphrase"
+   --type="hierarchical deterministic" \
+   --debug=true \
+   --basedir="$WALLET_DIR" \
+   --wallet="$WITHDRAWALS_WALLET_NAME" \
+   --walletpassphrase="$WITHDRAWALS_WALLET_PASSWORD"
 
-echo "Creating withdrawal account: $withdrawal_wallet_name/$withdrawal_account_name"
+for ((i=$ACC_START_INDEX;i<$ACC_END_INDEX;i++));
+do
+   account_name="$WITHDRAWALS_WALLET_NAME/$i"
+   echo "Creating withdrawal account $account_name"
 
-# Create single withdrawal account
-~/go/bin/ethdo account create \
-   --basedir="$walletbasedir" \
-   --account="$withdrawal_wallet_name/$withdrawal_account_name" \
-   --walletpassphrase="$withdrawal_wallet_passphrase" \
-   --passphrase="$withdrawal_account_passphrase"
+   ~/go/bin/ethdo account create \
+      --basedir="$WALLET_DIR" \
+      --account="$account_name" \
+      --store="filesystem" \
+      --walletpassphrase="$WITHDRAWALS_WALLET_PASSWORD"
+
+done

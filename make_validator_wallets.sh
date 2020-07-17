@@ -8,15 +8,7 @@ then
     [[ "$0" = "$BASH_SOURCE" ]] && exit 1 || return 1
 fi
 
-walletbasedir=$WALLET_DIR
-
-validator_wallet_name="Validators"
-validator_wallet_passphrase=$VALIDATORS_WALLET_PASSWORD
-
-account_start=$ACC_START_INDEX
-account_end=$ACC_END_INDEX
-
-mkdir -p "$walletbasedir"
+mkdir -p "$WALLET_DIR"
 
 echo "Creating validator wallet"
 
@@ -24,19 +16,19 @@ echo "Creating validator wallet"
 ~/go/bin/ethdo wallet create \
    --type="hierarchical deterministic" \
    --debug=true \
-   --basedir="$walletbasedir" \
-   --wallet="$validator_wallet_name" \
-   --walletpassphrase="$validator_wallet_passphrase"
+   --basedir="$WALLET_DIR" \
+   --wallet="$VALIDATORS_WALLET_NAME" \
+   --walletpassphrase="$VALIDATORS_WALLET_PASSWORD"
 
-for ((i=$account_start;i<$account_end;i++));
+for ((i=$ACC_START_INDEX;i<$ACC_END_INDEX;i++));
 do
-   account_name="$validator_wallet_name/$i"
+   account_name="$VALIDATORS_WALLET_NAME/$i"
    echo "Creating validator account $account_name"
 
    ~/go/bin/ethdo account create \
-      --basedir="$walletbasedir" \
+      --basedir="$WALLET_DIR" \
       --account="$account_name" \
       --store="filesystem" \
-      --walletpassphrase="$validator_wallet_passphrase"
+      --walletpassphrase="$VALIDATORS_WALLET_PASSWORD"
 
 done

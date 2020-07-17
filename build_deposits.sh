@@ -8,41 +8,21 @@ then
     [[ "$0" = "$BASH_SOURCE" ]] && exit 1 || return 1
 fi
 
-walletbasedir=$WALLET_DIR
-account_passwords_csv_file=$ACCOUNT_PASSWORDS_LOC
 
-withdrawal_wallet_name="Withdrawal"
-withdrawal_account_name="Primary"
-
-# E.g. "0x00000113" for witti testnet
-forkversion=$FORK_VERSION
-
-amount="32Ether"
-
-deposit_datas_file=$DEPOSIT_DATAS_FILE
-
-INPUT=$account_passwords_csv_file
-OLDIFS=$IFS
-IFS=','
-[ ! -f $INPUT ] && { echo "$INPUT file not found"; exit 99; }
-while read account_name account_passphrase
+for ((i=$ACC_START_INDEX;i<$ACC_END_INDEX;i++));
 do
-  account_name=$(echo -n "$account_name" | tr -d '"')
-  account_passphrase=$(echo -n "$account_passphrase" | tr -d '"')
-	echo "Building deposit for: $account_name"
+  validator_name="$VALIDATORS_WALLET_NAME/$i"
+  withdrawal_name="$WITHDRAWALS_WALLET_NAME/$i"
+	echo "Building deposit for: $validator_name (withdrawal to $withdrawal_name)"
 	# echo "Pass: $account_passphrase"
 
    x=$(ethdo validator depositdata \
-      --basedir="$walletbasedir" \
-      --validatoraccount="$account_name" \
-      --withdrawalaccount="$withdrawal_wallet_name/$withdrawal_account_name" \
-      --depositvalue="$amount" \
-      --forkversion="$forkversion" \
-      --walletpassphrase="$wallet_passphrase" \
-      --passphrase="$account_passphrase")
+      --basedir="$WALLET_DIR" \
+      --validatoraccount="$validator_name" \
+      --withdrawalaccount="$withdrawal_name" \
+      --depositvalue="$DEPOSIT_AMOUNT" \
+      --forkversion="$FORK_VERSION" \
+      --walletpassphrase="$VALIDATORS_WALLET_PASSWORD")
 
-   echo "$x" >> "$deposit_datas_file"
-done < $INPUT
-IFS=$OLDIFS
-
-
+   echo "$x" >> "$DEPOSIT_DATAS_FILE"
+done

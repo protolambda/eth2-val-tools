@@ -2,12 +2,16 @@
 
 # Warning: bad open passwords, use something else
 # Do not have weak plain passwords like this open for non-test environments.
+# Note: Only HD wallets are supported as source. Thus only wallet passwords, no account passwords.
 # *change these*
 export VALIDATORS_WALLET_PASSWORD="foo"
-export WITHRAWAL_WALLET_PASSWORD="bar"
-export WITHRAWAL_ACC_PASSWORD="quix"
+export WITHDRAWALS_WALLET_PASSWORD="bar"
 
-# TODO: insert fork version here, e.g. '0x12abcdef`
+export VALIDATORS_WALLET_NAME="Validators"
+export WITHDRAWALS_WALLET_NAME="Withdrawals"
+
+# TODO: insert fork version here
+# E.g. "0x00000113" for witti testnet
 export FORK_VERSION="TODO"
 export WALLET_DIR="./wallets/altona"
 
@@ -24,6 +28,10 @@ export ACC_END_INDEX=15
 export DEPOSIT_CONTRACT_ADDRESS="TODO"
 export DEPOSIT_DATAS_FILE="./wallets/altona/deposit_datas.txt"
 
+# What the deposit tx will send, change to 0Ether for testnet deposit contracts if necessary
+export DEPOSIT_ACTUAL_VALUE="32Ether"
+# What the deposit data will include
+export DEPOSIT_AMOUNT="32Ether"
 
 # DO NOT DO THIS IN MAINNET
 # With testnets you can be lazy and directly use a Goerli Eth1 keypair
