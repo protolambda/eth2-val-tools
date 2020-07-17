@@ -96,6 +96,12 @@ The output is:
  Each directory contains a `voting-keystore.json`, an EIP 2335 keystore file, with `path` field set to empty string.
  The `voting-keystore.json` name is a requirement of Lighthouse.
 
+#### Nimbus
+
+Nimbus, a lot like lighthouse, expects a keys and secrets directory, which can be configured.
+Each keystore is named `keystore.json` instead of `voting-keystore.json` however.
+For ease of use, an additional `nimbus-keys` directory will be output, with this naming scheme.
+
 #### Teku
 
 Like Lighthouse, Teku is also key-centric, but requires you to be explicit about finding keys. I.e. you need the CLI options:
