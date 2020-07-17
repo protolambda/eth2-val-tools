@@ -1,6 +1,5 @@
 #!/bin/bash
 
-export VALIDATORS_WALLET_NAME="Validators"
 # Warning: bad open passwords, use something else
 # Do not have weak plain passwords like this open for non-test environments.
 # Note: Only HD wallets are supported as source. Thus only wallet passwords, no account passwords.
@@ -15,9 +14,6 @@ export WITHDRAWALS_WALLET_NAME="Withdrawals"
 # E.g. "0x00000113" for witti testnet
 export FORK_VERSION="TODO"
 export WALLET_DIR="./wallets/altona"
-
-# This is where the passwords go for each of the accounts that will be generated
-export ACCOUNT_PASSWORDS_LOC="./wallets/altona/val_passwords.csv"
 
 # Range of accounts to create, deposit, etc.
 # Incl.
