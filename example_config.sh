@@ -14,8 +14,10 @@ export WALLET_DIR="./wallets/altona"
 # This is where the passwords go for each of the accounts that will be generated
 export ACCOUNT_PASSWORDS_LOC="./wallets/altona/val_passwords.csv"
 
-# Account wallet index start/end, both inclusive.
-export ACC_START_INDEX=1
+# Range of accounts to create, deposit, etc.
+# Incl.
+export ACC_START_INDEX=0
+# Excl.
 export ACC_END_INDEX=15
 
 # TODO: Insert deposit contract address here

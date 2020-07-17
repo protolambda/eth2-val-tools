@@ -16,7 +16,7 @@
 # lock file
 *.lock
 
-wallets
+wallet_legacy
 
 deposit_datas.txt
 
@@ -26,3 +26,5 @@ backup
 
 *_output
 *_backup
+
+wallet_legacy
