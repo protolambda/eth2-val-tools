@@ -10,7 +10,7 @@ fi
 
 mkdir -p "$WALLET_DIR"
 
-echo "Creating validator wallet"
+echo "Creating validator wallet in $WALLET_DIR"
 
 # Create wallet
 ethdo wallet create \

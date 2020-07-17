@@ -12,8 +12,8 @@ export WITHDRAWALS_WALLET_NAME="Withdrawals"
 
 # TODO: insert fork version here
 # E.g. "0x00000113" for witti testnet
-export FORK_VERSION="TODO"
-export WALLET_DIR="./wallets/altona"
+export FORK_VERSION="0x00000123"
+export WALLET_DIR="./wallets/example"
 
 # Range of accounts to create, deposit, etc.
 # Incl.
@@ -22,8 +22,8 @@ export ACC_START_INDEX=0
 export ACC_END_INDEX=15
 
 # TODO: Insert deposit contract address here
-export DEPOSIT_CONTRACT_ADDRESS="TODO"
-export DEPOSIT_DATAS_FILE="./wallets/altona/deposit_datas.txt"
+export DEPOSIT_CONTRACT_ADDRESS="0xcccccccccccccccccccccccccccccccccccccccc"
+export DEPOSIT_DATAS_FILE="./wallets/example/deposit_datas.txt"
 
 # What the deposit tx will send, change to 0Ether for testnet deposit contracts if necessary
 export DEPOSIT_ACTUAL_VALUE="32Ether"
