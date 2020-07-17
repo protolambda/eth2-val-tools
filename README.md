@@ -8,6 +8,20 @@ Requirements:
 - Install [`ethdo`](https://github.com/wealdtech/ethdo)
 - Install [`ethereal`](https://github.com/wealdtech/ethereal/)
 
+Important: when installing, run the commands outside of the root directory of this repository, to not mix up the go modules.
+
+```shell script
+# Install this assignments tool
+go install .
+
+# Move out of this dir
+cd ..
+
+# Install ethdo and ethereal
+GO111MODULE=on go get github.com/wealdtech/ethdo
+GO111MODULE=on go get github.com/wealdtech/ethereal 
+```
+
 Steps:
 - `. my_config.sh`: central configuration with environment vars, see `example_config.sh` for an example
 - `. make_withdrawal_wallet.sh`: prepare a withdrawal wallet, single account is re-used for each deposit, good enough for testing.
