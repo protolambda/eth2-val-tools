@@ -594,6 +594,31 @@ func assignVals(ctx context.Context,
 	return va.Unlock()
 }
 
+func createMnemonicCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "mnemonic",
+		Short: "Create a random mnemonic",
+		Args:  cobra.NoArgs,
+		Run: func(cmd *cobra.Command, args []string) {
+			checkErr := func(err error, msg string) {
+				if err != nil {
+					if msg != "" {
+						err = fmt.Errorf("%s: %v", msg, err)
+					}
+					cmd.PrintErr(err)
+					os.Exit(1)
+				}
+			}
+			entropy, err := bip39.NewEntropy(256)
+			checkErr(err, "cannot get 256 bits of entropy")
+			mnemonic, err := bip39.NewMnemonic(entropy)
+			checkErr(err, "cannot create mnemonic")
+			cmd.Println(mnemonic)
+		},
+	}
+	return cmd
+}
+
 func main() {
 	rootCmd := &cobra.Command{
 		Use:   "eth2-val-tools",
@@ -604,6 +629,7 @@ func main() {
 		},
 	}
 	rootCmd.AddCommand(assignCommand())
+	rootCmd.AddCommand(createMnemonicCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
