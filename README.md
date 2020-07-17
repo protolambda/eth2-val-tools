@@ -23,13 +23,10 @@ GO111MODULE=on go get github.com/wealdtech/ethereal
 ```
 
 Steps:
+- `eth2-val-tools mnemonic`, twice: one for validator keys, one for withdrawal keys. Put them in the config.
 - `. my_config.sh`: central configuration with environment vars, see `example_config.sh` for an example
-- `. make_withdrawal_wallet.sh`: prepare a withdrawal wallet, single account is re-used for each deposit, good enough for testing.
-- `. make_validator_wallet.sh`: builds wallet + passwords file
-- `. build_deposits.sh`: reads passwords file, builds deposit data for each account in it
+- `. build_deposits.sh`: uses the mnemonics to generate deposit data for the configured range of accounts. (overwrites any existing deposit data file)
 - `. exec_deposits.sh`: executes deposit datas, making eth1 transactions
-
-Warning: If you run any of the scripts multiple times, beware that it appends to files and may cause duplicates.
 
 For automatic validator assignment, tracking and deployment, use the `assign` command of the Go module in this repo. 
 
@@ -41,8 +38,7 @@ This keeps track of validator assignments in a json file, protected from concurr
 
 You can then make assignments of `n` validators, generating a wallet to use on the host the validators were assigned to.
 
-The source wallet format assumes [Ethdo](https://github.com/wealdtech/ethdo),
- using the [Eth2-client-wallet library](https://github.com/wealdtech/go-eth2-wallet).
+The sourced accounts are from a validators-mnemonic and a specified range of accounts.
 
 ```
 Assign `n` available validators to `hostname`. If --add is true, it will add `n` assigned validators, instead of filling up to `n` total assigned to the host
@@ -51,25 +47,59 @@ Usage:
   eth2-val-tools assign [flags]
 
 Flags:
-      --add                         If the assignment should add to the existing assignment
-      --assignments string          Path of the current assignments to adjust (default "assignments.json")
-  -n, --count uint                  Amount of validators to assign
-  -h, --help                        help for assign
-      --hostname string             Unique name of the remote host to assign validators to (default "morty")
-      --key-man-loc string          Location to write to the 'location' field in the keymanager_opts.json file (Prysm only)
-      --out-loc string              Path of the output data for the host, where wallets, keys, secrets dir, etc. are written (default "assigned_data")
-      --source-keys-csv string      CSV of source key passwords. Account name (with wallet prefix), account password
-      --source-wallet-loc string    Path of the source wallet, empty to use default
-      --source-wallet-name string   Name of the wallet to look for keys in (default "Validators")
-      --source-wallet-pass string   Pass for the source wallet itself. Empty to disable
+      --add                       If the assignment should add to the existing assignment
+      --assignments string        Path of the current assignments to adjust (default "assignments.json")
+      --config-base-path string   Location to use as base in the config file (Teku only) (default "/data")
+  -n, --count uint                Amount of validators to assign
+  -h, --help                      help for assign
+      --hostname string           Unique name of the remote host to assign validators to (default "morty")
+      --key-man-loc string        Location to write to the 'location' field in the keymanager_opts.json file (Prysm only)
+      --out-loc string            Path of the output data for the host, where wallets, keys, secrets dir, etc. are written (default "assigned_data")
+      --source-max uint           Maximum validator index in HD path range (excl.)
+      --source-min uint           Minimum validator index in HD path range (incl.)
+      --source-mnemonic string    The validators mnemonic to source account keys from
 
 ```
 
-### Output
+### `mnemonic`
+
+Outputs a bare 256 bit entropy BIP39 mnemonic, or stops with exit code 1.
+
+```
+Create a random mnemonic
+
+Usage:
+  eth2-val-tools mnemonic [flags]
+
+Flags:
+  -h, --help   help for mnemonic
+```
+
+### `deposit-data`
+
+To quickly generate a list of deposit datas for a range of accounts.
+
+```
+Create deposit data for the given range of validators. 1 json-encoded deposit data per line.
+
+Usage:
+  eth2-val-tools deposit-data [flags]
+
+Flags:
+      --amount uint                   Amount to deposit, in Gwei (default 32000000000)
+      --fork-version string           Fork version, e.g. 0x11223344
+  -h, --help                          help for deposit-data
+      --source-max uint               Maximum validator index in HD path range (excl.)
+      --source-min uint               Minimum validator index in HD path range (incl.)
+      --validators-mnemonic string    Mnemonic to use for validators.
+      --withdrawals-mnemonic string   Mnemonic to use for withdrawals. Withdrawal accounts are assumed to have matching paths with validators.
+```
+
+## Output
 
 Eth2 clients structure their validators differently, but this tool outputs all the required data for each of them.
 
-#### Prysm
+### Prysm
 
 Prysm is a special case, they are centric around the Ethdo wallet system. Instead of using the EIP 2335 key files directly, like all the other clients.
 
@@ -84,7 +114,7 @@ In the output directory, a `prysm` dir is placed, with the following contents:
   - The wallet name is called `Assigned`, and the keys are `Assigned/val_<pubkey here>` (excluding `<` and `>`) The pubkey is hex encoded, without `0x`.
   - The wallet also contains an `index` file and all other ethdo-specific things
 
-#### Lighthouse
+### Lighthouse
 
 Lighthouse is key-centric, no wallets involved. Following EIP 2335.
 
@@ -96,13 +126,13 @@ The output is:
  Each directory contains a `voting-keystore.json`, an EIP 2335 keystore file, with `path` field set to empty string.
  The `voting-keystore.json` name is a requirement of Lighthouse.
 
-#### Nimbus
+### Nimbus
 
 Nimbus, a lot like lighthouse, expects a keys and secrets directory, which can be configured.
 Each keystore is named `keystore.json` instead of `voting-keystore.json` however.
 For ease of use, an additional `nimbus-keys` directory will be output, with this naming scheme.
 
-#### Teku
+### Teku
 
 Like Lighthouse, Teku is also key-centric, but requires you to be explicit about finding keys. I.e. you need the CLI options:
 ```

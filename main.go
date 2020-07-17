@@ -401,9 +401,6 @@ func assignCommand() *cobra.Command {
 
 	var outputDataPath string
 
-	var sourceWalletLoc string
-	var sourceWalletName string
-	var sourceWalletPass string
 	var sourceMnemonic string
 
 	var accountMin uint64
@@ -420,17 +417,8 @@ func assignCommand() *cobra.Command {
 		Args:  cobra.NoArgs,
 		Run: func(cmd *cobra.Command, args []string) {
 			checkErr := makeCheckErr(cmd)
-			var wallet types.Wallet
-			var err error
-			if sourceMnemonic != "" {
-				wallet, err = walletFromMnemonic(sourceMnemonic)
-				checkErr(err, "could not create scratch wallet from mnemonic")
-			} else {
-				wallet, err = e2wallet.OpenWallet(sourceWalletName, e2wallet.WithStore(storeWithOptions(sourceWalletPass, sourceWalletLoc)))
-				checkErr(err, "could not open source wallet")
-				err = wallet.(types.WalletLocker).Unlock(context.Background(), []byte(sourceWalletPass))
-				checkErr(err, "failed to unlock wallet")
-			}
+			wallet, err := walletFromMnemonic(sourceMnemonic)
+			checkErr(err, "could not create scratch wallet from mnemonic")
 
 			ww := &WalletWriter{}
 			checkErr(assignVals(context.Background(), wallet.(types.WalletAccountByNameProvider), wallet.Name(),
@@ -443,10 +431,7 @@ func assignCommand() *cobra.Command {
 
 	cmd.Flags().StringVar(&outputDataPath, "out-loc", "assigned_data", "Path of the output data for the host, where wallets, keys, secrets dir, etc. are written")
 
-	cmd.Flags().StringVar(&sourceWalletLoc, "source-wallet-loc", "", "Path of the source wallet, empty to use default")
-	cmd.Flags().StringVar(&sourceWalletName, "source-wallet-name", "Validators", "Name of the wallet to look for keys in")
-	cmd.Flags().StringVar(&sourceWalletPass, "source-wallet-pass", "", "Pass for the HD source wallet itself. Empty to disable")
-	cmd.Flags().StringVar(&sourceMnemonic, "source-mnemonic", "", "Alternative to source wallet. Empty to disable")
+	cmd.Flags().StringVar(&sourceMnemonic, "source-mnemonic", "", "The validators mnemonic to source account keys from")
 
 	cmd.Flags().Uint64Var(&accountMin, "source-min", 0, "Minimum validator index in HD path range (incl.)")
 	cmd.Flags().Uint64Var(&accountMax, "source-max", 0, "Maximum validator index in HD path range (excl.)")
@@ -691,7 +676,7 @@ func createDepositDatasCmd() *cobra.Command {
 
 				dataRoot := ssz.HashTreeRoot(&data, beacon.DepositDataSSZ)
 				jsonData := map[string]interface{}{
-					"account":                accPath,
+					"account":                accPath, // for ease with tracking where it came from.
 					"pubkey":                 hex.EncodeToString(data.Pubkey[:]),
 					"withdrawal_credentials": hex.EncodeToString(data.WithdrawalCredentials[:]),
 					"signature":              hex.EncodeToString(data.Signature[:]),

@@ -1,14 +1,9 @@
 #!/bin/bash
 
-# Warning: bad open passwords, use something else
-# Do not have weak plain passwords like this open for non-test environments.
-# Note: Only HD wallets are supported as source. Thus only wallet passwords, no account passwords.
-# *change these*
-export VALIDATORS_WALLET_PASSWORD="foo"
-export WITHDRAWALS_WALLET_PASSWORD="bar"
-
-export VALIDATORS_WALLET_NAME="Validators"
-export WITHDRAWALS_WALLET_NAME="Withdrawals"
+# Generate a random one with `eth2-val-tools mnemonic`
+# These are BIP39 mnemonics
+export VALIDATORS_MNEMONIC="enough animal salon barrel poet method husband evidence grain excuse grass science there wedding blind glimpse surge loan reopen chalk toward change survey bag"
+export WITHDRAWALS_MNEMONIC="stay depend ignore lady access will dress idea hybrid tube original riot between plate ethics ecology green response hollow famous salute they warrior little"
 
 # TODO: insert fork version here
 # E.g. "0x00000113" for witti testnet
@@ -23,7 +18,7 @@ export ACC_END_INDEX=15
 
 # TODO: Insert deposit contract address here
 export DEPOSIT_CONTRACT_ADDRESS="0xcccccccccccccccccccccccccccccccccccccccc"
-export DEPOSIT_DATAS_FILE="./wallets/example/deposit_datas.txt"
+export DEPOSIT_DATAS_FILE="./deposit_datas.txt"
 
 # What the deposit tx will send, change to 0Ether for testnet deposit contracts if necessary
 export DEPOSIT_ACTUAL_VALUE="32Ether"
