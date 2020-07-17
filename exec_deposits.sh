@@ -1,5 +1,4 @@
 #!/bin/bash
-
 echo "USE AT YOUR OWN RISK"
 read -p "Are you sure? " -n 1 -r
 echo
@@ -27,28 +26,21 @@ if [[ -z "${ETH1_FROM_PRIV}" ]]; then
   exit 1 || return 1
 fi
 
-deposit_datas_file=$DEPOSIT_DATAS_FILE
-
-# Required for testnets that are not recognized by ethdo
-force_deposit=$FORCE_DEPOSIT
-
-eth1_network=goerli
-
 # Iterate through lines, each is a json of the deposit data and some metadata
 while read x; do
    # TODO: check validity of deposit before sending it
    account_name="$(echo "$x" | jq '.account')"
    pubkey="$(echo "$x" | jq '.pubkey')"
    echo "Sending deposit for validator $account_name $pubkey"
-   ~/go/bin/ethereal beacon deposit \
+   ethereal beacon deposit \
+      --allow-unknown-contract=$FORCE_DEPOSIT \
       --address="$DEPOSIT_CONTRACT_ADDRESS" \
-      --force=$force_deposit \
-      --network=$eth1_network \
+      --network=$ETH1_NETWORK \
       --data="$x" \
       --value="$DEPOSIT_ACTUAL_VALUE"
       --from="$ETH1_FROM_ADDR" \
       --privatekey="$ETH1_FROM_PRIV"
    echo "Sent deposit for validator $account_name $pubkey"
-done < "$deposit_datas_file"
+done < "$DEPOSIT_DATAS_FILE"
 
 

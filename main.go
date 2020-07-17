@@ -1,10 +1,9 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
-	bip39 "github.com/tyler-smith/go-bip39"
-	hd "github.com/wealdtech/go-eth2-wallet-hd/v2"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -13,9 +12,11 @@ import (
 	"github.com/google/uuid"
 	hbls "github.com/herumi/bls-eth-go-binary/bls"
 	"github.com/spf13/cobra"
+	"github.com/tyler-smith/go-bip39"
 	e2types "github.com/wealdtech/go-eth2-types/v2"
 	e2wallet "github.com/wealdtech/go-eth2-wallet"
 	keystorev4 "github.com/wealdtech/go-eth2-wallet-encryptor-keystorev4"
+	hd "github.com/wealdtech/go-eth2-wallet-hd/v2"
 	filesystem "github.com/wealdtech/go-eth2-wallet-store-filesystem"
 	scratch "github.com/wealdtech/go-eth2-wallet-store-scratch"
 	types "github.com/wealdtech/go-eth2-wallet-types/v2"
@@ -233,10 +234,10 @@ func (ww *WalletWriter) buildPrysmWallet(outPath string, keyMngWalletLoc string)
 		return err
 	}
 	// nd wallets always unlock
-	_ = outWal.Unlock(nil)
+	_ = outWal.(types.WalletLocker).Unlock(context.Background(), nil)
 	outWallet := outWal.(types.WalletAccountImporter)
 	for _, e := range ww.entries {
-		if _, err := outWallet.ImportAccount(e.name, e.secretKey.Marshal(), []byte(e.passphrase)); err != nil {
+		if _, err := outWallet.ImportAccount(context.Background(), e.name, e.secretKey.Marshal(), []byte(e.passphrase)); err != nil {
 			return err
 		}
 	}
@@ -400,18 +401,21 @@ func assignCommand() *cobra.Command {
 				if len(seed) != 32 {
 					checkErr(fmt.Errorf("got %d, expected %d bytes", len(seed), 32), "Seed must have 24 words")
 				}
-				wallet, err = hd.CreateWalletFromSeed("imported wallet", []byte{}, store, encryptor, seed)
+				wallet, err = hd.CreateWalletFromSeed(context.Background(), "imported wallet", []byte{}, store, encryptor, seed)
 				checkErr(err, "failed to create scratch wallet from seed")
-				err = wallet.Unlock([]byte{})
+				err = wallet.(types.WalletLocker).Unlock(context.Background(), []byte{})
 				checkErr(err, "failed to unlock scratch wallet")
 			} else {
 				var err error
 				wallet, err = e2wallet.OpenWallet(sourceWalletName, e2wallet.WithStore(storeWithOptions(sourceWalletPass, sourceWalletLoc)))
 				checkErr(err, "could not open source wallet")
+				err = wallet.(types.WalletLocker).Unlock(context.Background(), []byte(sourceWalletPass))
+				checkErr(err, "failed to unlock wallet")
 			}
 
 			ww := &WalletWriter{}
-			checkErr(assignVals(wallet, accountMin, accountMax, ww, assignmentsLoc, hostname, count, addCount), "failed to assign validators")
+			checkErr(assignVals(context.Background(), wallet.(types.WalletAccountByNameProvider), wallet.Name(),
+				accountMin, accountMax, ww, assignmentsLoc, hostname, count, addCount), "failed to assign validators")
 			checkErr(ww.WriteOutputs(outputDataPath, keyMngWalletLoc, configBasePath), "failed to write output")
 		},
 	}
@@ -441,7 +445,11 @@ func narrowedPubkey(pub string) string {
 	return strings.TrimPrefix(strings.ToLower(pub), "0x")
 }
 
-func assignVals(wallet types.Wallet, minAcc uint64, maxAcc uint64, output WalletOutput, assignmentsPath string, hostname string, n uint64, addAssignments bool) error {
+func assignVals(ctx context.Context,
+	wallet types.WalletAccountByNameProvider, walletName string,
+	minAcc uint64, maxAcc uint64,
+	output WalletOutput,
+	assignmentsPath string, hostname string, n uint64, addAssignments bool) error {
 
 	va, err := LoadAssignments(assignmentsPath)
 	if err != nil {
@@ -497,7 +505,7 @@ func assignVals(wallet types.Wallet, minAcc uint64, maxAcc uint64, output Wallet
 			// Try look for unassigned accounts in the wallet
 			for i := minAcc; i < maxAcc; i++ {
 				name := validatorKeyName(i)
-				a, err := wallet.AccountByName(name)
+				a, err := wallet.AccountByName(ctx, name)
 				if err != nil {
 					fmt.Printf("Account %s cannot be opened, continuing to next account.\n", name)
 					continue
@@ -514,7 +522,7 @@ func assignVals(wallet types.Wallet, minAcc uint64, maxAcc uint64, output Wallet
 						Host:       hostname,
 						Time:       assignmentTime,
 						Path:       name,
-						WalletName: wallet.Name(),
+						WalletName: walletName,
 					})
 					toAssign -= 1
 				}
@@ -542,18 +550,20 @@ func assignVals(wallet types.Wallet, minAcc uint64, maxAcc uint64, output Wallet
 
 		// Write new key store for current assignments to host
 		for _, entry := range newAssignedToHost {
-			a, err := wallet.AccountByName(entry.Path)
+			a, err := wallet.AccountByName(ctx, entry.Path)
 			if err != nil {
 				return fmt.Errorf("cannot find wallet account for assignment, path: %s, pub: %s", entry.Path, entry.Pubkey)
 			}
-			if err := a.Unlock([]byte{}); err != nil {
-				return fmt.Errorf("failed to unlock priv key for account %s with pubkey %s: %v", a.ID().String(), entry.Pubkey, err)
+			if aLocked, ok := a.(types.AccountLocker); ok {
+				if err := aLocked.Unlock(ctx, []byte{}); err != nil {
+					return fmt.Errorf("failed to unlock priv key for account %s with pubkey %s: %v", a.ID().String(), entry.Pubkey, err)
+				}
 			}
 			aPriv, ok := a.(types.AccountPrivateKeyProvider)
 			if !ok {
 				return fmt.Errorf("cannot get priv key for account %s with pubkey %s", a.ID().String(), entry.Pubkey)
 			}
-			priv, err := aPriv.PrivateKey()
+			priv, err := aPriv.PrivateKey(ctx)
 			if err != nil {
 				return fmt.Errorf("cannot read priv key for account %s with pubkey %s: %v", a.ID().String(), entry.Pubkey, err)
 			}

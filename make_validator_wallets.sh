@@ -13,7 +13,7 @@ mkdir -p "$WALLET_DIR"
 echo "Creating validator wallet"
 
 # Create wallet
-~/go/bin/ethdo wallet create \
+ethdo wallet create \
    --type="hierarchical deterministic" \
    --debug=true \
    --basedir="$WALLET_DIR" \
@@ -25,7 +25,7 @@ do
    account_name="$VALIDATORS_WALLET_NAME/$i"
    echo "Creating validator account $account_name"
 
-   ~/go/bin/ethdo account create \
+   ethdo account create \
       --basedir="$WALLET_DIR" \
       --account="$account_name" \
       --store="filesystem" \

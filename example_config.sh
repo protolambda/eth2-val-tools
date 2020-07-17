@@ -1,5 +1,6 @@
 #!/bin/bash
 
+export VALIDATORS_WALLET_NAME="Validators"
 # Warning: bad open passwords, use something else
 # Do not have weak plain passwords like this open for non-test environments.
 # Note: Only HD wallets are supported as source. Thus only wallet passwords, no account passwords.
@@ -40,4 +41,8 @@ export ETH1_FROM_ADDR="0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 export ETH1_FROM_PRIV="0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 
 # The deposit contract of Altona is not recognized, so we're forcing deposits through anyway
+# Required for testnets that are not recognized by ethdo
 export FORCE_DEPOSIT=true
+
+# Eth1 network ID as used by Ethdo
+export ETH1_NETWORK=goerli
