@@ -10,7 +10,7 @@ fi
 
 
 eth2-val-tools deposit-data \
-  --source=min=$ACC_START_INDEX \
+  --source-min=$ACC_START_INDEX \
   --source-max=$ACC_END_INDEX \
   --fork-version="$FORK_VERSION" \
   --withdrawals-mnemonic="$WITHDRAWALS_MNEMONIC" \
