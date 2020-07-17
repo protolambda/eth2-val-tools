@@ -305,18 +305,23 @@ func (ww *WalletWriter) WriteMetaOutputs(filepath string, keyMngWalletLoc string
 			return err
 		}
 	}
-	// And all keystores, but all in the same directory (nimbus)
-	allkeyfilesPath := path.Join(filepath, "allkeys")
-	if err := os.MkdirAll(allkeyfilesPath, os.ModePerm); err != nil {
-		return err
-	}
-	for _, e := range ww.entries {
-		dat, err := e.MarshalJSON()
-		if err != nil {
-			return err
-		}
-		if err := ioutil.WriteFile(path.Join(allkeyfilesPath, e.PubHex()+".json"), dat, 0644); err != nil {
-			return err
+	{
+		// nimbus has different keystore names
+		keyfileName := "keystore.json"
+		keyfilesPath := path.Join(filepath, "nimbus-keys")
+		// For all: write JSON keystore files, each in their own directory
+		for _, e := range ww.entries {
+			keyDirPath := path.Join(keyfilesPath, e.PubHex())
+			if err := os.MkdirAll(keyDirPath, os.ModePerm); err != nil {
+				return err
+			}
+			dat, err := e.MarshalJSON()
+			if err != nil {
+				return err
+			}
+			if err := ioutil.WriteFile(path.Join(keyDirPath, keyfileName), dat, 0644); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -338,7 +343,7 @@ func (ww *WalletWriter) WriteMetaOutputs(filepath string, keyMngWalletLoc string
 		ValidatorsPasswordFiles: make([]string, 0),
 	}
 	for _, e := range ww.entries {
-		tekuConfig.ValidatorsKeyFiles = append(tekuConfig.ValidatorsKeyFiles, path.Join(configBasePath, "keys", e.PubHex()+".json"))
+		tekuConfig.ValidatorsKeyFiles = append(tekuConfig.ValidatorsKeyFiles, path.Join(configBasePath, "keys", e.PubHex(), keyfileName))
 		tekuConfig.ValidatorsPasswordFiles = append(tekuConfig.ValidatorsPasswordFiles, path.Join(configBasePath, "secrets", e.PubHex()))
 	}
 	tekuConfData, err := yaml.Marshal(&tekuConfig)
