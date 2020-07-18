@@ -34,7 +34,7 @@ import (
 
 func init() {
 	hbls.Init(hbls.BLS12_381)
-	hbls.SetETHmode(1)
+	hbls.SetETHmode(3)
 }
 
 func validatorKeyName(i uint64) string {

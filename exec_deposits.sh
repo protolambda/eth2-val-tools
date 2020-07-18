@@ -37,7 +37,7 @@ while read x; do
       --address="$DEPOSIT_CONTRACT_ADDRESS" \
       --network=$ETH1_NETWORK \
       --data="$x" \
-      --value="$DEPOSIT_ACTUAL_VALUE"
+      --value="$DEPOSIT_ACTUAL_VALUE" \
       --from="$ETH1_FROM_ADDR" \
       --privatekey="$ETH1_FROM_PRIV"
    echo "Sent deposit for validator $account_name $pubkey"

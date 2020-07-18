@@ -8,7 +8,6 @@ export WITHDRAWALS_MNEMONIC="stay depend ignore lady access will dress idea hybr
 # TODO: insert fork version here
 # E.g. "0x00000113" for witti testnet
 export FORK_VERSION="0x00000123"
-export WALLET_DIR="./wallets/example"
 
 # Range of accounts to create, deposit, etc.
 # Incl.
