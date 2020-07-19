@@ -4,9 +4,7 @@
 
 ## Deposits
 
-Requirements:
-- Install [`ethdo`](https://github.com/wealdtech/ethdo)
-- Install [`ethereal`](https://github.com/wealdtech/ethereal/)
+Optionally install [`ethereal`](https://github.com/wealdtech/ethereal/), to run the `exec_deposits.sh` step. 
 
 Important: when installing, run the commands outside of the root directory of this repository, to not mix up the go modules.
 
@@ -17,8 +15,7 @@ go install .
 # Move out of this dir
 cd ..
 
-# Install ethdo and ethereal
-GO111MODULE=on go get github.com/wealdtech/ethdo
+# Install ethereal
 GO111MODULE=on go get github.com/wealdtech/ethereal 
 ```
 
