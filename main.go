@@ -1,9 +1,9 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
-	"encoding/csv"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -11,14 +11,19 @@ import (
 	filelock "github.com/MichaelS11/go-file-lock"
 	"github.com/google/uuid"
 	hbls "github.com/herumi/bls-eth-go-binary/bls"
+	"github.com/protolambda/zrnt/eth2/beacon"
+	"github.com/protolambda/zrnt/eth2/util/hashing"
+	"github.com/protolambda/zrnt/eth2/util/ssz"
 	"github.com/spf13/cobra"
+	"github.com/tyler-smith/go-bip39"
 	e2types "github.com/wealdtech/go-eth2-types/v2"
 	e2wallet "github.com/wealdtech/go-eth2-wallet"
 	keystorev4 "github.com/wealdtech/go-eth2-wallet-encryptor-keystorev4"
+	hd "github.com/wealdtech/go-eth2-wallet-hd/v2"
 	filesystem "github.com/wealdtech/go-eth2-wallet-store-filesystem"
+	scratch "github.com/wealdtech/go-eth2-wallet-store-scratch"
 	types "github.com/wealdtech/go-eth2-wallet-types/v2"
 	"gopkg.in/yaml.v2"
-	"io"
 	"io/ioutil"
 	"os"
 	"path"
@@ -29,29 +34,11 @@ import (
 
 func init() {
 	hbls.Init(hbls.BLS12_381)
-	hbls.SetETHmode(1)
+	hbls.SetETHmode(3)
 }
 
-type AccountID struct {
-	uuid.UUID
-}
-
-func (id *AccountID) MarshalJSON() ([]byte, error) {
-	var s = id.UUID.String()
-	return json.Marshal(&s)
-}
-
-func (id *AccountID) UnmarshalJSON(b []byte) error {
-	var s string
-	if err := json.Unmarshal(b, &s); err != nil {
-		return err
-	}
-	uid, err := uuid.Parse(s)
-	if err != nil {
-		return fmt.Errorf("could not parse UUID: %v", err)
-	}
-	*id = AccountID{uid}
-	return nil
+func validatorKeyName(i uint64) string {
+	return fmt.Sprintf("m/12381/3600/%d/0/0", i)
 }
 
 type ValidatorAssignEntry struct {
@@ -61,10 +48,10 @@ type ValidatorAssignEntry struct {
 	Host string `json:"host"`
 	// Time of assignment
 	Time string `json:"assignment_time"`
-	// ID as used in the wallet
-	AccountID AccountID `json:"account_id"`
-	// Account name used in the source wallet (excl. wallet name prefix)
-	SourceAccountName string `json:"name"`
+	// Path, the account path, e.g. "m/12381/3600/123/0/0"
+	Path string `json:"path"`
+	// WalletName, Where the account comes from
+	WalletName string
 }
 
 type ValidatorAssignments struct {
@@ -250,10 +237,10 @@ func (ww *WalletWriter) buildPrysmWallet(outPath string, keyMngWalletLoc string)
 		return err
 	}
 	// nd wallets always unlock
-	_ = outWal.Unlock(nil)
+	_ = outWal.(types.WalletLocker).Unlock(context.Background(), nil)
 	outWallet := outWal.(types.WalletAccountImporter)
 	for _, e := range ww.entries {
-		if _, err := outWallet.ImportAccount(e.name, e.secretKey.Marshal(), []byte(e.passphrase)); err != nil {
+		if _, err := outWallet.ImportAccount(context.Background(), e.name, e.secretKey.Marshal(), []byte(e.passphrase)); err != nil {
 			return err
 		}
 	}
@@ -281,7 +268,7 @@ type TekuConfig struct {
 	ValidatorsPasswordFiles []string `yaml:"validators-key-password-files"`
 }
 
-func (ww *WalletWriter) WriteMetaOutputs(filepath string, keyMngWalletLoc string, configBasePath string) error {
+func (ww *WalletWriter) WriteOutputs(filepath string, keyMngWalletLoc string, configBasePath string) error {
 	if _, err := os.Stat(filepath); !os.IsNotExist(err) {
 		return errors.New("output for assignments already exists! Aborting")
 	}
@@ -370,34 +357,41 @@ func (ww *WalletWriter) WriteMetaOutputs(filepath string, keyMngWalletLoc string
 	return nil
 }
 
-type AccountPasswords map[string]string
-
-func ReadAccountPasswordsFile(filePath string) (AccountPasswords, error) {
-	f, err := os.Open(filePath)
-	if err != nil {
-		return nil, err
-	}
-
-	accountToPass := make(AccountPasswords)
-
-	// Create a new reader.
-	r := csv.NewReader(f)
-	for {
-		record, err := r.Read()
-		// Stop at EOF.
-		if err == io.EOF {
-			break
-		}
-
+func makeCheckErr(cmd *cobra.Command) func(err error, msg string) {
+	return func(err error, msg string) {
 		if err != nil {
-			return nil, err
+			if msg != "" {
+				err = fmt.Errorf("%s: %v", msg, err)
+			}
+			cmd.PrintErr(err)
+			os.Exit(1)
 		}
-		if len(record) != 2 {
-			return nil, fmt.Errorf("expected 2 fields, but got %d: %v", len(record), record)
-		}
-		accountToPass[record[0]] = record[1]
 	}
-	return accountToPass, nil
+}
+
+func walletFromMnemonic(mnemonic string) (types.Wallet, error) {
+	store := scratch.New()
+	encryptor := keystorev4.New()
+
+	var seed []byte
+	seed, err := bip39.MnemonicToByteArray(mnemonic)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode seed: %v", err)
+	}
+	// Strip checksum; last byte.
+	seed = seed[:len(seed)-1]
+	if len(seed) != 32 {
+		return nil, fmt.Errorf("seed must have 24 words, got %d, expected %d bytes", len(seed), 32)
+	}
+	wallet, err := hd.CreateWalletFromSeed(context.Background(), "imported wallet", []byte{}, store, encryptor, seed)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create scratch wallet from seed: %v", err)
+	}
+	err = wallet.(types.WalletLocker).Unlock(context.Background(), []byte{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to unlock scratch wallet: %v", err)
+	}
+	return wallet, nil
 }
 
 func assignCommand() *cobra.Command {
@@ -407,38 +401,31 @@ func assignCommand() *cobra.Command {
 
 	var outputDataPath string
 
-	var sourceWalletLoc string
-	var sourceWalletName string
-	var sourceWalletPass string
+	var sourceMnemonic string
 
-	var sourceKeysPassCsv string
+	var accountMin uint64
+	var accountMax uint64
 
 	var assignmentsLoc string
 	var hostname string
 	var count uint64
 	var addCount bool
 
+	var walletName string
+
 	cmd := &cobra.Command{
 		Use:   "assign",
 		Short: "Assign `n` available validators to `hostname`. If --add is true, it will add `n` assigned validators, instead of filling up to `n` total assigned to the host",
 		Args:  cobra.NoArgs,
 		Run: func(cmd *cobra.Command, args []string) {
-			checkErr := func(err error) {
-				if err != nil {
-					cmd.PrintErr(err)
-					os.Exit(1)
-				}
-			}
-
-			accountPasswords, err := ReadAccountPasswordsFile(sourceKeysPassCsv)
-			checkErr(err)
-
-			wal, err := e2wallet.OpenWallet(sourceWalletName, e2wallet.WithStore(storeWithOptions(sourceWalletPass, sourceWalletLoc)))
-			checkErr(err)
+			checkErr := makeCheckErr(cmd)
+			wallet, err := walletFromMnemonic(sourceMnemonic)
+			checkErr(err, "could not create scratch wallet from mnemonic")
 
 			ww := &WalletWriter{}
-			checkErr(assignVals(wal, ww, accountPasswords, assignmentsLoc, hostname, count, addCount))
-			checkErr(ww.WriteMetaOutputs(outputDataPath, keyMngWalletLoc, configBasePath))
+			checkErr(assignVals(context.Background(), wallet.(types.WalletAccountByNameProvider), walletName,
+				accountMin, accountMax, ww, assignmentsLoc, hostname, count, addCount), "failed to assign validators")
+			checkErr(ww.WriteOutputs(outputDataPath, keyMngWalletLoc, configBasePath), "failed to write output")
 		},
 	}
 	cmd.Flags().StringVar(&keyMngWalletLoc, "key-man-loc", "", "Location to write to the 'location' field in the keymanager_opts.json file (Prysm only)")
@@ -446,16 +433,16 @@ func assignCommand() *cobra.Command {
 
 	cmd.Flags().StringVar(&outputDataPath, "out-loc", "assigned_data", "Path of the output data for the host, where wallets, keys, secrets dir, etc. are written")
 
-	cmd.Flags().StringVar(&sourceWalletLoc, "source-wallet-loc", "", "Path of the source wallet, empty to use default")
-	cmd.Flags().StringVar(&sourceWalletName, "source-wallet-name", "Validators", "Name of the wallet to look for keys in")
-	cmd.Flags().StringVar(&sourceWalletPass, "source-wallet-pass", "", "Pass for the source wallet itself. Empty to disable")
+	cmd.Flags().StringVar(&sourceMnemonic, "source-mnemonic", "", "The validators mnemonic to source account keys from")
 
-	cmd.Flags().StringVar(&sourceKeysPassCsv, "source-keys-csv", "", "CSV of source key passwords. Account name (with wallet prefix), account password")
+	cmd.Flags().Uint64Var(&accountMin, "source-min", 0, "Minimum validator index in HD path range (incl.)")
+	cmd.Flags().Uint64Var(&accountMax, "source-max", 0, "Maximum validator index in HD path range (excl.)")
 
 	cmd.Flags().StringVar(&assignmentsLoc, "assignments", "assignments.json", "Path of the current assignments to adjust")
 	cmd.Flags().StringVar(&hostname, "hostname", "morty", "Unique name of the remote host to assign validators to")
 	cmd.Flags().Uint64VarP(&count, "count", "n", 0, "Amount of validators to assign")
 	cmd.Flags().BoolVar(&addCount, "add", false, "If the assignment should add to the existing assignment")
+	cmd.Flags().StringVar(&walletName, "wallet-name", "unknown imported wallet", "Name of the wallet, to tag accounts with in the assignments file")
 
 	return cmd
 }
@@ -465,8 +452,11 @@ func narrowedPubkey(pub string) string {
 	return strings.TrimPrefix(strings.ToLower(pub), "0x")
 }
 
-func assignVals(wallet types.Wallet, output WalletOutput,
-	accountPasswords AccountPasswords, assignmentsPath string, hostname string, n uint64, addAssignments bool) error {
+func assignVals(ctx context.Context,
+	wallet types.WalletAccountByNameProvider, walletName string,
+	minAcc uint64, maxAcc uint64,
+	output WalletOutput,
+	assignmentsPath string, hostname string, n uint64, addAssignments bool) error {
 
 	va, err := LoadAssignments(assignmentsPath)
 	if err != nil {
@@ -520,14 +510,14 @@ func assignVals(wallet types.Wallet, output WalletOutput,
 		accountCount := 0
 		if toAssign > 0 {
 			// Try look for unassigned accounts in the wallet
-			for a := range wallet.Accounts() {
-				accountCount += 1
-				name := a.Name()
-				_, ok := accountPasswords[fmt.Sprintf("%s/%s", wallet.Name(), name)]
-				if !ok {
-					fmt.Printf("Password for account %s is not known, looking for another account to assign.\n", name)
+			for i := minAcc; i < maxAcc; i++ {
+				name := validatorKeyName(i)
+				a, err := wallet.AccountByName(ctx, name)
+				if err != nil {
+					fmt.Printf("Account %s cannot be opened, continuing to next account.\n", name)
 					continue
 				}
+				accountCount += 1
 				pubkey := narrowedPubkey(hex.EncodeToString(a.PublicKey().Marshal()))
 				// Add the account if it is not already assigned
 				if _, ok := assignedPubkeys[pubkey]; !ok {
@@ -535,11 +525,11 @@ func assignVals(wallet types.Wallet, output WalletOutput,
 					assignedPubkeys[pubkey] = struct{}{}
 
 					newAssignedToHost = append(newAssignedToHost, ValidatorAssignEntry{
-						Pubkey:            pubkey,
-						Host:              hostname,
-						Time:              assignmentTime,
-						AccountID:         AccountID{a.ID()},
-						SourceAccountName: name,
+						Pubkey:     pubkey,
+						Host:       hostname,
+						Time:       assignmentTime,
+						Path:       name,
+						WalletName: walletName,
 					})
 					toAssign -= 1
 				}
@@ -567,23 +557,20 @@ func assignVals(wallet types.Wallet, output WalletOutput,
 
 		// Write new key store for current assignments to host
 		for _, entry := range newAssignedToHost {
-			password, ok := accountPasswords[fmt.Sprintf("%s/%s", wallet.Name(), entry.SourceAccountName)]
-			if !ok {
-				fmt.Printf("Password for assigned account %s is not known. Skipping, assigned but not including its key.\n", entry.SourceAccountName)
-				continue
-			}
-			a, err := wallet.AccountByID(entry.AccountID.UUID)
+			a, err := wallet.AccountByName(ctx, entry.Path)
 			if err != nil {
-				return fmt.Errorf("cannot find wallet account for assignment, id: %s, pub: %s", entry.AccountID.UUID.String(), entry.Pubkey)
+				return fmt.Errorf("cannot find wallet account for assignment, path: %s, pub: %s", entry.Path, entry.Pubkey)
 			}
-			if err := a.Unlock([]byte(password)); err != nil {
-				return fmt.Errorf("failed to unlock priv key for account %s with pubkey %s: %v", a.ID().String(), entry.Pubkey, err)
+			if aLocked, ok := a.(types.AccountLocker); ok {
+				if err := aLocked.Unlock(ctx, []byte{}); err != nil {
+					return fmt.Errorf("failed to unlock priv key for account %s with pubkey %s: %v", a.ID().String(), entry.Pubkey, err)
+				}
 			}
 			aPriv, ok := a.(types.AccountPrivateKeyProvider)
 			if !ok {
 				return fmt.Errorf("cannot get priv key for account %s with pubkey %s", a.ID().String(), entry.Pubkey)
 			}
-			priv, err := aPriv.PrivateKey()
+			priv, err := aPriv.PrivateKey(ctx)
 			if err != nil {
 				return fmt.Errorf("cannot read priv key for account %s with pubkey %s: %v", a.ID().String(), entry.Pubkey, err)
 			}
@@ -614,6 +601,109 @@ func assignVals(wallet types.Wallet, output WalletOutput,
 	return va.Unlock()
 }
 
+func createMnemonicCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "mnemonic",
+		Short: "Create a random mnemonic",
+		Args:  cobra.NoArgs,
+		Run: func(cmd *cobra.Command, args []string) {
+			checkErr := makeCheckErr(cmd)
+			entropy, err := bip39.NewEntropy(256)
+			checkErr(err, "cannot get 256 bits of entropy")
+			mnemonic, err := bip39.NewMnemonic(entropy)
+			checkErr(err, "cannot create mnemonic")
+			cmd.Print(mnemonic)
+		},
+	}
+	return cmd
+}
+
+func createDepositDatasCmd() *cobra.Command {
+	var accountMin uint64
+	var accountMax uint64
+
+	var amountGwei uint64
+
+	var forkVersion string
+
+	var validatorsMnemonic string
+	var withdrawalsMnemonic string
+
+	cmd := &cobra.Command{
+		Use:   "deposit-data",
+		Short: "Create deposit data for the given range of validators. 1 json-encoded deposit data per line.",
+		Args:  cobra.NoArgs,
+		Run: func(cmd *cobra.Command, args []string) {
+			checkErr := makeCheckErr(cmd)
+			var genesisForkVersion beacon.Version
+			checkErr(genesisForkVersion.UnmarshalText([]byte(forkVersion)), "cannot decode fork version")
+			validators, err := walletFromMnemonic(validatorsMnemonic)
+			checkErr(err, "failed to load validators mnemonic")
+			valAccs := validators.(types.WalletAccountByNameProvider)
+			withdrawals, err := walletFromMnemonic(withdrawalsMnemonic)
+			checkErr(err, "failed to load validators mnemonic")
+			withdrawlAccs := withdrawals.(types.WalletAccountByNameProvider)
+			ctx := context.Background()
+			for i := accountMin; i < accountMax; i++ {
+				accPath := validatorKeyName(i)
+				val, err := valAccs.AccountByName(ctx, accPath)
+				checkErr(err, fmt.Sprintf("could not get validator key %d", i))
+
+				var pub beacon.BLSPubkey
+				copy(pub[:], val.PublicKey().Marshal())
+
+				withdr, err := withdrawlAccs.AccountByName(ctx, accPath)
+				checkErr(err, fmt.Sprintf("could not get withdrawl key %d", i))
+
+				var withdrPub beacon.BLSPubkey
+				copy(withdrPub[:], withdr.PublicKey().Marshal())
+				withdrCreds := hashing.Hash(withdrPub[:])
+				withdrCreds[0] = beacon.BLS_WITHDRAWAL_PREFIX
+
+				data := beacon.DepositData{
+					Pubkey:                pub,
+					WithdrawalCredentials: withdrCreds,
+					Amount:                beacon.Gwei(amountGwei),
+					Signature:             beacon.BLSSignature{},
+				}
+				msgRoot := ssz.HashTreeRoot(data.ToMessage(), beacon.DepositMessageSSZ)
+				valPriv, err := val.(types.AccountPrivateKeyProvider).PrivateKey(ctx)
+				checkErr(err, "cannot get validator private key")
+				var secKey hbls.SecretKey
+				checkErr(secKey.Deserialize(valPriv.Marshal()), "cannot convert validator priv key")
+
+				dom := beacon.ComputeDomain(beacon.DOMAIN_DEPOSIT, genesisForkVersion, beacon.Root{})
+				msg := beacon.ComputeSigningRoot(msgRoot, dom)
+				sig := secKey.SignHash(msg[:])
+				copy(data.Signature[:], sig.Serialize())
+
+				dataRoot := ssz.HashTreeRoot(&data, beacon.DepositDataSSZ)
+				jsonData := map[string]interface{}{
+					"account":                accPath, // for ease with tracking where it came from.
+					"pubkey":                 hex.EncodeToString(data.Pubkey[:]),
+					"withdrawal_credentials": hex.EncodeToString(data.WithdrawalCredentials[:]),
+					"signature":              hex.EncodeToString(data.Signature[:]),
+					"value":                  data.Amount,
+					"deposit_data_root":      hex.EncodeToString(dataRoot[:]),
+					"version":                1, // ethereal cli requirement
+				}
+				jsonStr, err := json.Marshal(jsonData)
+				checkErr(err, "could not encode deposit data to json")
+				cmd.Println(string(jsonStr))
+			}
+		},
+	}
+
+	cmd.Flags().StringVar(&validatorsMnemonic, "validators-mnemonic", "", "Mnemonic to use for validators.")
+	cmd.Flags().StringVar(&withdrawalsMnemonic, "withdrawals-mnemonic", "", "Mnemonic to use for withdrawals. Withdrawal accounts are assumed to have matching paths with validators.")
+	cmd.Flags().Uint64Var(&accountMin, "source-min", 0, "Minimum validator index in HD path range (incl.)")
+	cmd.Flags().Uint64Var(&accountMax, "source-max", 0, "Maximum validator index in HD path range (excl.)")
+	cmd.Flags().Uint64Var(&amountGwei, "amount", uint64(beacon.MAX_EFFECTIVE_BALANCE), "Amount to deposit, in Gwei")
+	cmd.Flags().StringVar(&forkVersion, "fork-version", "", "Fork version, e.g. 0x11223344")
+
+	return cmd
+}
+
 func main() {
 	rootCmd := &cobra.Command{
 		Use:   "eth2-val-tools",
@@ -624,7 +714,10 @@ func main() {
 		},
 	}
 	rootCmd.AddCommand(assignCommand())
-
+	rootCmd.AddCommand(createMnemonicCmd())
+	rootCmd.AddCommand(createDepositDatasCmd())
+	rootCmd.SetOut(os.Stdout)
+	rootCmd.SetErr(os.Stderr)
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}
