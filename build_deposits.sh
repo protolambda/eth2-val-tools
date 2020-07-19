@@ -12,6 +12,7 @@ fi
 eth2-val-tools deposit-data \
   --source-min=$ACC_START_INDEX \
   --source-max=$ACC_END_INDEX \
+  --amount="$DEPOSIT_AMOUNT" \
   --fork-version="$FORK_VERSION" \
   --withdrawals-mnemonic="$WITHDRAWALS_MNEMONIC" \
   --validators-mnemonic="$VALIDATORS_MNEMONIC" > $DEPOSIT_DATAS_FILE

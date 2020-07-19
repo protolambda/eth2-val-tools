@@ -21,8 +21,8 @@ export DEPOSIT_DATAS_FILE="./deposit_datas.txt"
 
 # What the deposit tx will send, change to 0Ether for testnet deposit contracts if necessary
 export DEPOSIT_ACTUAL_VALUE="32Ether"
-# What the deposit data will include
-export DEPOSIT_AMOUNT="32Ether"
+# What the deposit data will include (in Gwei)
+export DEPOSIT_AMOUNT="32000000000"
 
 # DO NOT DO THIS IN MAINNET
 # With testnets you can be lazy and directly use a Goerli Eth1 keypair
