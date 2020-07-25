@@ -278,6 +278,9 @@ func (ww *WalletWriter) WriteOutputs(filepath string, keyMngWalletLoc string, co
 	// What lighthouse requires as file name
 	keyfileName := "voting-keystore.json"
 	keyfilesPath := path.Join(filepath, "keys")
+	if err := os.Mkdir(keyfilesPath, os.ModePerm); err != nil {
+		return err
+	}
 	// For all: write JSON keystore files, each in their own directory (lighthouse requirement)
 	for _, e := range ww.entries {
 		keyDirPath := path.Join(keyfilesPath, e.PubHex())
@@ -296,6 +299,9 @@ func (ww *WalletWriter) WriteOutputs(filepath string, keyMngWalletLoc string, co
 		// nimbus has different keystore names
 		keyfileName := "keystore.json"
 		keyfilesPath := path.Join(filepath, "nimbus-keys")
+		if err := os.Mkdir(keyfilesPath, os.ModePerm); err != nil {
+			return err
+		}
 		// For all: write JSON keystore files, each in their own directory
 		for _, e := range ww.entries {
 			keyDirPath := path.Join(keyfilesPath, e.PubHex())
