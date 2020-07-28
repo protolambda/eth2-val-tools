@@ -624,6 +624,133 @@ func createMnemonicCmd() *cobra.Command {
 	return cmd
 }
 
+func createWithdrawalCredsCmd() *cobra.Command {
+	var accountMin uint64
+	var accountMax uint64
+
+	var withdrawalsMnemonic string
+
+	cmd := &cobra.Command{
+		Use:   "withdrawal-creds",
+		Short: "Create withdrawal credentials for the given range of validators. 1 json-encoded withdrawal credential and verification data per line.",
+		Args:  cobra.NoArgs,
+		Run: func(cmd *cobra.Command, args []string) {
+
+			checkErr := makeCheckErr(cmd)
+			withdrawals, err := walletFromMnemonic(withdrawalsMnemonic)
+			checkErr(err, "failed to load validators mnemonic")
+			withdrawlAccs := withdrawals.(types.WalletAccountByNameProvider)
+			ctx := context.Background()
+			for i := accountMin; i < accountMax; i++ {
+				accPath := validatorKeyName(i)
+				withdr, err := withdrawlAccs.AccountByName(ctx, accPath)
+				checkErr(err, fmt.Sprintf("could not get withdrawl key %d", i))
+
+				var withdrPub beacon.BLSPubkey
+				copy(withdrPub[:], withdr.PublicKey().Marshal())
+				withdrCreds := hashing.Hash(withdrPub[:])
+				withdrCreds[0] = beacon.BLS_WITHDRAWAL_PREFIX
+
+				withdrPriv, err := withdr.(types.AccountPrivateKeyProvider).PrivateKey(ctx)
+				checkErr(err, "cannot get withdrawal private key")
+				var secKey hbls.SecretKey
+				checkErr(secKey.Deserialize(withdrPriv.Marshal()), "cannot convert withdrawal priv key")
+
+				sig := secKey.SignHash(withdrCreds[:])
+
+				jsonData := map[string]interface{}{
+					"account":                accPath, // for ease with tracking where it came from.
+					"withdrawal_pubkey":      hex.EncodeToString(withdrPub[:]),
+					"withdrawal_credentials": hex.EncodeToString(withdrCreds[:]),
+					"test_signature":         hex.EncodeToString(sig.Serialize()),
+				}
+				jsonStr, err := json.Marshal(jsonData)
+				checkErr(err, "could not withdrawal credentials data to json")
+				cmd.Println(string(jsonStr))
+			}
+		},
+	}
+
+	cmd.Flags().StringVar(&withdrawalsMnemonic, "withdrawals-mnemonic", "", "Mnemonic to use for withdrawals.")
+	cmd.Flags().Uint64Var(&accountMin, "source-min", 0, "Minimum validator index in HD path range (incl.)")
+	cmd.Flags().Uint64Var(&accountMax, "source-max", 0, "Maximum validator index in HD path range (excl.)")
+	return cmd
+}
+
+func createDepositDatasWithWithdrawalCredsCmd() *cobra.Command {
+	var account uint64
+	var amountGwei uint64
+	var withdrawalCredentials string
+	var forkVersion string
+	var validatorsMnemonic string
+
+	cmd := &cobra.Command{
+		Use:   "deposit-data-with-withdrawal-creds",
+		Short: "Create deposit data for the specified validator account from the provided mnemonic with provided withdrawal credentials. Output 1 json-encoded deposit data",
+		Args:  cobra.NoArgs,
+		Run: func(cmd *cobra.Command, args []string) {
+			checkErr := makeCheckErr(cmd)
+			var genesisForkVersion beacon.Version
+			checkErr(genesisForkVersion.UnmarshalText([]byte(forkVersion)), "cannot decode fork version")
+			var withdrCreds beacon.Root
+			checkErr(withdrCreds.UnmarshalText([]byte(withdrawalCredentials)), "cannot decode withdrawal credentials")
+
+			validators, err := walletFromMnemonic(validatorsMnemonic)
+			checkErr(err, "failed to load validators mnemonic")
+			valAccs := validators.(types.WalletAccountByNameProvider)
+			ctx := context.Background()
+
+			accPath := validatorKeyName(account)
+			val, err := valAccs.AccountByName(ctx, accPath)
+			checkErr(err, fmt.Sprintf("could not get validator key %d", account))
+
+			var pub beacon.BLSPubkey
+			copy(pub[:], val.PublicKey().Marshal())
+
+			data := beacon.DepositData{
+				Pubkey:                pub,
+				WithdrawalCredentials: withdrCreds,
+				Amount:                beacon.Gwei(amountGwei),
+				Signature:             beacon.BLSSignature{},
+			}
+			msgRoot := ssz.HashTreeRoot(data.ToMessage(), beacon.DepositMessageSSZ)
+			valPriv, err := val.(types.AccountPrivateKeyProvider).PrivateKey(ctx)
+			checkErr(err, "cannot get validator private key")
+			var secKey hbls.SecretKey
+			checkErr(secKey.Deserialize(valPriv.Marshal()), "cannot convert validator priv key")
+
+			dom := beacon.ComputeDomain(beacon.DOMAIN_DEPOSIT, genesisForkVersion, beacon.Root{})
+			msg := beacon.ComputeSigningRoot(msgRoot, dom)
+			sig := secKey.SignHash(msg[:])
+			copy(data.Signature[:], sig.Serialize())
+
+			dataRoot := ssz.HashTreeRoot(&data, beacon.DepositDataSSZ)
+			jsonData := map[string]interface{}{
+				"account":                accPath, // for ease with tracking where it came from.
+				"pubkey":                 hex.EncodeToString(data.Pubkey[:]),
+				"withdrawal_credentials": hex.EncodeToString(data.WithdrawalCredentials[:]),
+				"signature":              hex.EncodeToString(data.Signature[:]),
+				"value":                  data.Amount,
+				"deposit_data_root":      hex.EncodeToString(dataRoot[:]),
+				"version":                1, // ethereal cli requirement
+			}
+			jsonStr, err := json.Marshal(jsonData)
+			checkErr(err, "could not encode deposit data to json")
+			cmd.Println(string(jsonStr))
+		},
+	}
+
+	cmd.Flags().StringVar(&validatorsMnemonic, "validators-mnemonic", "", "Mnemonic to use for validators.")
+	cmd.Flags().StringVar(&withdrawalCredentials, "withdrawal-creds", "", "0x prefixed withdrawal credentials")
+	cmd.MarkFlagRequired("withdrawal-creds")
+	cmd.Flags().Uint64Var(&account, "account", 0, "Validator index in HD path range.")
+	cmd.MarkFlagRequired("account")
+	cmd.Flags().Uint64Var(&amountGwei, "amount", uint64(beacon.MAX_EFFECTIVE_BALANCE), "Amount to deposit, in Gwei")
+	cmd.Flags().StringVar(&forkVersion, "fork-version", "", "Fork version, e.g. 0x11223344")
+
+	return cmd
+}
+
 func createDepositDatasCmd() *cobra.Command {
 	var accountMin uint64
 	var accountMax uint64
@@ -721,6 +848,8 @@ func main() {
 	}
 	rootCmd.AddCommand(assignCommand())
 	rootCmd.AddCommand(createMnemonicCmd())
+	rootCmd.AddCommand(createWithdrawalCredsCmd())
+	rootCmd.AddCommand(createDepositDatasWithWithdrawalCredsCmd())
 	rootCmd.AddCommand(createDepositDatasCmd())
 	rootCmd.SetOut(os.Stdout)
 	rootCmd.SetErr(os.Stderr)
