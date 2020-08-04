@@ -208,6 +208,10 @@ func (ke *KeyEntry) PubHex() string {
 	return "0x" + hex.EncodeToString(ke.publicKey.Marshal())
 }
 
+func (ke *KeyEntry) PubHexBare() string {
+	return hex.EncodeToString(ke.publicKey.Marshal())
+}
+
 type WalletWriter struct {
 	entries []*KeyEntry
 }
@@ -318,15 +322,31 @@ func (ww *WalletWriter) WriteOutputs(filepath string, keyMngWalletLoc string, co
 		}
 	}
 
-	// For Lighthouse: they need a directory that maps pubkey to passwords, one per file
-	secretsDirPath := path.Join(filepath, "secrets")
-	if err := os.Mkdir(secretsDirPath, os.ModePerm); err != nil {
-		return err
-	}
-	for _, e := range ww.entries {
-		pubHex := e.PubHex()
-		if err := ioutil.WriteFile(path.Join(secretsDirPath, pubHex), []byte(e.passphrase), 0644); err != nil {
+	{
+		// For Lighthouse: they need a directory that maps pubkey to passwords, one per file
+		secretsDirPath := path.Join(filepath, "secrets")
+		if err := os.Mkdir(secretsDirPath, os.ModePerm); err != nil {
 			return err
+		}
+		for _, e := range ww.entries {
+			pubHex := e.PubHex()
+			if err := ioutil.WriteFile(path.Join(secretsDirPath, pubHex), []byte(e.passphrase), 0644); err != nil {
+				return err
+			}
+		}
+	}
+
+	{
+		// For Lodestar: they need a directory that maps pubkey to passwords, one per file, but no 0x prefix.
+		secretsDirPath := path.Join(filepath, "lodestar-secrets")
+		if err := os.Mkdir(secretsDirPath, os.ModePerm); err != nil {
+			return err
+		}
+		for _, e := range ww.entries {
+			pubHex := e.PubHexBare()
+			if err := ioutil.WriteFile(path.Join(secretsDirPath, pubHex), []byte(e.passphrase), 0644); err != nil {
+				return err
+			}
 		}
 	}
 
