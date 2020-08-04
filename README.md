@@ -139,8 +139,22 @@ Like Lighthouse, Teku is also key-centric, but requires you to be explicit about
 --encrypted-keystore-validator-password-file=secrets/foobar
 ```
 
-This matches lighthouse close enough, but is clumsy. To make this easier, a `pubkeys.json` file is provided, 
- with a list of hex encoded pubkeys (to replace `foobar` with in above example).
+This matches lighthouse close enough, but is clumsy. To make this easier,
+ a teku configuration file is output, with the validator mappings configured for you.
+
+### Lodestar
+
+Lodestar is very similar to Lighthouse/Nimbus, but has 3 directories:
+```
+  --keystoresDir="{{keystores_relative_dir}}"
+  --secretsDir="{{secrets_relative_dir}}"
+  --validatorsDbDir="{{validators_db_relative_dir}}"
+```
+
+These directories are relative to the `--rootDir` directory.
+The keystores dir has pubkey-named directories, each with a `voting-keystore.json`.
+The secrets dir has pubkey-named files containing passwords, but the pubkey in the names are encoded without the `0x` prefix.
+The validators-DB dir is unimportant, and can be left empty. This is managed by lodestar.
 
 ## License
 
