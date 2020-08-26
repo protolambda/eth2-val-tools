@@ -5,13 +5,13 @@ from eth2spec.utils import bls
 
 assert bls.bls_active
 
-pubkey = BLSPubkey('0xa5bd5efcf6960ce6874f581d17c531248865a9d87261ff11240e8c27ac922e8fea42bae190da52f0055baa662b92a5bc')
-withdrawal_creds = Bytes32('0x00c1e3add0226c543b1471d127018cd667b4d68ae6dd0ebdf37a05c0de0200ce')
+pubkey = BLSPubkey('b776c36018e9d6a8e063c953b7a5d362d5ba02741adb0b14e0b0ff204883ea501813d85dbb70fdb5231368e8af011b5e')
+withdrawal_creds = Bytes32('002a8799f001b350777f6ea25689f960962fc71b2083a9b5e80102b316d4a331')
 amount = Gwei(32000000000)
-signature = BLSSignature('0x8c5739934e16e856afe95ddbdc83a2f39e259af1bf1bb411a1e9b4dcf3bbe710c7c42bb5d922644338c39ebf91d5a0fa034098c10e9aac756cce098c7abcc17966ced3d3ae2bc0fbd3dc0fdb5a9c34c3b9871881c6bf8dcc6c301ca0b64b8db5')
-deposit_root = Root('0x6b0c1ae845ea2b54d7a1da21043ec45e4b27532c1a50364009713ab30614068b')
+signature = BLSSignature('b12af968a0f2b6f55b448dd395a3cc2a88b07f902cbddc1ec735dde573c6cad67c099241c50ce9e856a7a2c6ef3f8f08105d3ed5227bcee0356d3a471748bcd445c4f4471d540b3049fa324d519b0bd13e16dbcb340ebc90f165f005fa81ff7d')
+deposit_root = Root('ba066d557b3b27a55ae129f01c569dff5daa9ca8a3e45f13188dcb1ac01cb1c5')
 
-fork_version = Version('0x00000123')
+fork_version = Version('0x00000001')
 
 deposit_message = DepositMessage(
     pubkey=pubkey,

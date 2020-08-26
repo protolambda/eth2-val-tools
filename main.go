@@ -730,6 +730,39 @@ func createDepositDatasCmd() *cobra.Command {
 	return cmd
 }
 
+func createPubkeysCmd() *cobra.Command {
+	var accountMin uint64
+	var accountMax uint64
+
+	var validatorsMnemonic string
+
+	cmd := &cobra.Command{
+		Use:   "pubkeys",
+		Short: "List pubkeys of the given range of validators. Output encoded as one pubkey per line.",
+		Args:  cobra.NoArgs,
+		Run: func(cmd *cobra.Command, args []string) {
+			checkErr := makeCheckErr(cmd)
+			validators, err := walletFromMnemonic(validatorsMnemonic)
+			checkErr(err, "failed to load validators mnemonic")
+			valAccs := validators.(types.WalletAccountByNameProvider)
+			ctx := context.Background()
+			for i := accountMin; i < accountMax; i++ {
+				accPath := validatorKeyName(i)
+				val, err := valAccs.AccountByName(ctx, accPath)
+				checkErr(err, fmt.Sprintf("could not get validator key %d", i))
+
+				var pub beacon.BLSPubkey
+				copy(pub[:], val.PublicKey().Marshal())
+				cmd.Println(pub.String())
+			}
+		},
+	}
+	cmd.Flags().StringVar(&validatorsMnemonic, "validators-mnemonic", "", "Mnemonic to use for validators.")
+	cmd.Flags().Uint64Var(&accountMin, "source-min", 0, "Minimum validator index in HD path range (incl.)")
+	cmd.Flags().Uint64Var(&accountMax, "source-max", 0, "Maximum validator index in HD path range (excl.)")
+	return cmd
+}
+
 func main() {
 	rootCmd := &cobra.Command{
 		Use:   "eth2-val-tools",
@@ -742,6 +775,7 @@ func main() {
 	rootCmd.AddCommand(assignCommand())
 	rootCmd.AddCommand(createMnemonicCmd())
 	rootCmd.AddCommand(createDepositDatasCmd())
+	rootCmd.AddCommand(createPubkeysCmd())
 	rootCmd.SetOut(os.Stdout)
 	rootCmd.SetErr(os.Stderr)
 	if err := rootCmd.Execute(); err != nil {

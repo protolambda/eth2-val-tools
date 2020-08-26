@@ -94,6 +94,15 @@ Flags:
       --withdrawals-mnemonic string   Mnemonic to use for withdrawals. Withdrawal accounts are assumed to have matching paths with validators.
 ```
 
+### `pubkeys`
+
+List pubkeys of the given range of validators. Output encoded as one pubkey per line.
+
+Example, list pubkeys (for a random new mnemonic), account range `[42, 123)`:
+```shell script
+eth2-val-tools pubkeys --validators-mnemonic="$(eth2-val-tools mnemonic)" --source-min=42 --source-max=123
+```
+
 ## Output
 
 Eth2 clients structure their validators differently, but this tool outputs all the required data for each of them.
