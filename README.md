@@ -1,6 +1,6 @@
 # Validator management tools
 
-*Warning: Use at your own risk, this is all very experimental*
+__*Warning: Use at your own RISK, this is all very EXPERIMENTAL*__
 
 ## Deposits
 
