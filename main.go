@@ -232,6 +232,15 @@ type KeyManagerOpts struct {
 }
 
 func (ww *WalletWriter) buildPrysmWallet(outPath string, keyMngWalletLoc string) error {
+
+	// a directory called "direct"
+	//  - keymanager_opts.json
+	//      '{"direct_eip_version": "EIP-2335"}'
+	//  - all-accounts.keystore.json
+	//    - Prysm doesn't know what individual keystores are, only allowing you to import them with CLI, but not simply load them as accounts.
+	//    - All pubkeys/privkeys are put in two lists, encoded as JSON, and those bytes are then encrypted exactly like a single private key would be normally
+	//    - And then persisted in "all-accounts.keystore.json"
+
 	ndStorePath := path.Join(outPath, "wallets")
 	walletName := "Assigned"
 	outWal, err := e2wallet.CreateWallet(walletName,
