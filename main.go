@@ -12,8 +12,9 @@ import (
 	"github.com/google/uuid"
 	hbls "github.com/herumi/bls-eth-go-binary/bls"
 	"github.com/protolambda/zrnt/eth2/beacon"
+	"github.com/protolambda/zrnt/eth2/configs"
 	"github.com/protolambda/zrnt/eth2/util/hashing"
-	"github.com/protolambda/zrnt/eth2/util/ssz"
+	"github.com/protolambda/ztyp/tree"
 	"github.com/spf13/cobra"
 	"github.com/tyler-smith/go-bip39"
 	e2types "github.com/wealdtech/go-eth2-types/v2"
@@ -34,7 +35,7 @@ import (
 
 func init() {
 	hbls.Init(hbls.BLS12_381)
-	hbls.SetETHmode(3)
+	hbls.SetETHmode(hbls.EthModeLatest)
 }
 
 func validatorKeyName(i uint64) string {
@@ -191,7 +192,7 @@ func (ke *KeyEntry) MarshalJSON() ([]byte, error) {
 	//data["name"] = ke.name
 	encryptor := keystorev4.New(keystorev4.WithCipher("pbkdf2"))
 	var err error
-	data["crypto"], err = encryptor.Encrypt(ke.secretKey.Marshal(), []byte(ke.passphrase))
+	data["crypto"], err = encryptor.Encrypt(ke.secretKey.Marshal(), ke.passphrase)
 	if err != nil {
 		return nil, err
 	}
@@ -418,7 +419,7 @@ func walletFromMnemonic(mnemonic string) (types.Wallet, error) {
 	if len(seed) != 32 {
 		return nil, fmt.Errorf("seed must have 24 words, got %d, expected %d bytes", len(seed), 32)
 	}
-	wallet, err := hd.CreateWalletFromSeed(context.Background(), "imported wallet", []byte{}, store, encryptor, seed)
+	wallet, err := hd.CreateWallet(context.Background(), "imported wallet", []byte{}, store, encryptor, seed)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create scratch wallet from seed: %v", err)
 	}
@@ -693,7 +694,7 @@ func createDepositDatasCmd() *cobra.Command {
 				var withdrPub beacon.BLSPubkey
 				copy(withdrPub[:], withdr.PublicKey().Marshal())
 				withdrCreds := hashing.Hash(withdrPub[:])
-				withdrCreds[0] = beacon.BLS_WITHDRAWAL_PREFIX
+				withdrCreds[0] = configs.Mainnet.BLS_WITHDRAWAL_PREFIX[0]
 
 				data := beacon.DepositData{
 					Pubkey:                pub,
@@ -701,18 +702,18 @@ func createDepositDatasCmd() *cobra.Command {
 					Amount:                beacon.Gwei(amountGwei),
 					Signature:             beacon.BLSSignature{},
 				}
-				msgRoot := ssz.HashTreeRoot(data.ToMessage(), beacon.DepositMessageSSZ)
+				msgRoot := data.ToMessage().HashTreeRoot(tree.GetHashFn())
 				valPriv, err := val.(types.AccountPrivateKeyProvider).PrivateKey(ctx)
 				checkErr(err, "cannot get validator private key")
 				var secKey hbls.SecretKey
 				checkErr(secKey.Deserialize(valPriv.Marshal()), "cannot convert validator priv key")
 
-				dom := beacon.ComputeDomain(beacon.DOMAIN_DEPOSIT, genesisForkVersion, beacon.Root{})
+				dom := beacon.ComputeDomain(configs.Mainnet.DOMAIN_DEPOSIT, genesisForkVersion, beacon.Root{})
 				msg := beacon.ComputeSigningRoot(msgRoot, dom)
 				sig := secKey.SignHash(msg[:])
 				copy(data.Signature[:], sig.Serialize())
 
-				dataRoot := ssz.HashTreeRoot(&data, beacon.DepositDataSSZ)
+				dataRoot := data.HashTreeRoot(tree.GetHashFn())
 				jsonData := map[string]interface{}{
 					"account":                accPath, // for ease with tracking where it came from.
 					"pubkey":                 hex.EncodeToString(data.Pubkey[:]),
@@ -733,7 +734,7 @@ func createDepositDatasCmd() *cobra.Command {
 	cmd.Flags().StringVar(&withdrawalsMnemonic, "withdrawals-mnemonic", "", "Mnemonic to use for withdrawals. Withdrawal accounts are assumed to have matching paths with validators.")
 	cmd.Flags().Uint64Var(&accountMin, "source-min", 0, "Minimum validator index in HD path range (incl.)")
 	cmd.Flags().Uint64Var(&accountMax, "source-max", 0, "Maximum validator index in HD path range (excl.)")
-	cmd.Flags().Uint64Var(&amountGwei, "amount", uint64(beacon.MAX_EFFECTIVE_BALANCE), "Amount to deposit, in Gwei")
+	cmd.Flags().Uint64Var(&amountGwei, "amount", uint64(configs.Mainnet.MAX_EFFECTIVE_BALANCE), "Amount to deposit, in Gwei")
 	cmd.Flags().StringVar(&forkVersion, "fork-version", "", "Fork version, e.g. 0x11223344")
 
 	return cmd
