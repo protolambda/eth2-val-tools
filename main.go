@@ -409,16 +409,7 @@ func walletFromMnemonic(mnemonic string) (types.Wallet, error) {
 	store := scratch.New()
 	encryptor := keystorev4.New()
 
-	var seed []byte
-	seed, err := bip39.MnemonicToByteArray(mnemonic)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode seed: %v", err)
-	}
-	// Strip checksum; last byte.
-	seed = seed[:len(seed)-1]
-	if len(seed) != 32 {
-		return nil, fmt.Errorf("seed must have 24 words, got %d, expected %d bytes", len(seed), 32)
-	}
+	seed := bip39.NewSeed(mnemonic, "")
 	wallet, err := hd.CreateWallet(context.Background(), "imported wallet", []byte{}, store, encryptor, seed)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create scratch wallet from seed: %v", err)
