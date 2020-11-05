@@ -656,6 +656,8 @@ func createDepositDatasCmd() *cobra.Command {
 	var validatorsMnemonic string
 	var withdrawalsMnemonic string
 
+	var asJsonList bool
+
 	cmd := &cobra.Command{
 		Use:   "deposit-data",
 		Short: "Create deposit data for the given range of validators. 1 json-encoded deposit data per line.",
@@ -671,6 +673,9 @@ func createDepositDatasCmd() *cobra.Command {
 			checkErr(err, "failed to load validators mnemonic")
 			withdrawlAccs := withdrawals.(types.WalletAccountByNameProvider)
 			ctx := context.Background()
+			if asJsonList {
+				cmd.Println("[")
+			}
 			for i := accountMin; i < accountMax; i++ {
 				accPath := validatorKeyName(i)
 				val, err := valAccs.AccountByName(ctx, accPath)
@@ -715,8 +720,14 @@ func createDepositDatasCmd() *cobra.Command {
 					"version":                1, // ethereal cli requirement
 				}
 				jsonStr, err := json.Marshal(jsonData)
+				if asJsonList && i + 1 < accountMax {
+					jsonStr = append(jsonStr, ',')
+				}
 				checkErr(err, "could not encode deposit data to json")
 				cmd.Println(string(jsonStr))
+			}
+			if asJsonList {
+				cmd.Println("]")
 			}
 		},
 	}
@@ -727,6 +738,7 @@ func createDepositDatasCmd() *cobra.Command {
 	cmd.Flags().Uint64Var(&accountMax, "source-max", 0, "Maximum validator index in HD path range (excl.)")
 	cmd.Flags().Uint64Var(&amountGwei, "amount", uint64(configs.Mainnet.MAX_EFFECTIVE_BALANCE), "Amount to deposit, in Gwei")
 	cmd.Flags().StringVar(&forkVersion, "fork-version", "", "Fork version, e.g. 0x11223344")
+	cmd.Flags().BoolVar(&asJsonList, "as-json-list", false, "If the json datas should be wrapped with brackets and separated with commas, like a json list.")
 
 	return cmd
 }
