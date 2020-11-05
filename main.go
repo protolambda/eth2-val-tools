@@ -710,7 +710,7 @@ func createDepositDatasCmd() *cobra.Command {
 					"pubkey":                 hex.EncodeToString(data.Pubkey[:]),
 					"withdrawal_credentials": hex.EncodeToString(data.WithdrawalCredentials[:]),
 					"signature":              hex.EncodeToString(data.Signature[:]),
-					"value":                  data.Amount,
+					"value":                  uint64(data.Amount),
 					"deposit_data_root":      hex.EncodeToString(dataRoot[:]),
 					"version":                1, // ethereal cli requirement
 				}
