@@ -17,10 +17,8 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/tyler-smith/go-bip39"
 	e2types "github.com/wealdtech/go-eth2-types/v2"
-	e2wallet "github.com/wealdtech/go-eth2-wallet"
 	keystorev4 "github.com/wealdtech/go-eth2-wallet-encryptor-keystorev4"
 	hd "github.com/wealdtech/go-eth2-wallet-hd/v2"
-	filesystem "github.com/wealdtech/go-eth2-wallet-store-filesystem"
 	scratch "github.com/wealdtech/go-eth2-wallet-store-scratch"
 	types "github.com/wealdtech/go-eth2-wallet-types/v2"
 	"io/ioutil"
@@ -117,58 +115,60 @@ func (ww *WalletWriter) InsertAccount(priv e2types.PrivateKey) error {
 	return nil
 }
 
-type KeyManagerOpts struct {
-	Location    string   `json:"location"`
-	Accounts    []string `json:"accounts"`
-	Passphrases []string `json:"passphrases"`
+type PrysmAccountStore struct {
+	PrivateKeys [][]byte `json:"private_keys"`
+	PublicKeys  [][]byte `json:"public_keys"`
 }
 
-func (ww *WalletWriter) buildPrysmWallet(outPath string, keyMngWalletLoc string) error {
-
+func (ww *WalletWriter) buildPrysmWallet(outPath string, prysmPass string) error {
+	if err := os.MkdirAll(outPath, os.ModePerm); err != nil {
+		return err
+	}
 	// a directory called "direct"
-	//  - keymanager_opts.json
+	//  - keymanageropts.json
 	//      '{"direct_eip_version": "EIP-2335"}'
 	//  - all-accounts.keystore.json
 	//    - Prysm doesn't know what individual keystores are, only allowing you to import them with CLI, but not simply load them as accounts.
 	//    - All pubkeys/privkeys are put in two lists, encoded as JSON, and those bytes are then encrypted exactly like a single private key would be normally
 	//    - And then persisted in "all-accounts.keystore.json"
 
-	ndStorePath := path.Join(outPath, "wallets")
-	walletName := "Assigned"
-	outWal, err := e2wallet.CreateWallet(walletName,
-		e2wallet.WithStore(filesystem.New(filesystem.WithLocation(ndStorePath))),
-		e2wallet.WithType("nd"))
+	store := PrysmAccountStore{}
+	for _, e := range ww.entries {
+		store.PublicKeys = append(store.PublicKeys, e.publicKey.Marshal())
+		store.PrivateKeys = append(store.PrivateKeys, e.secretKey.Marshal())
+	}
+	storeBytes, err := json.MarshalIndent(&store, "", "\t")
 	if err != nil {
 		return err
 	}
-	// nd wallets always unlock
-	_ = outWal.(types.WalletLocker).Unlock(context.Background(), nil)
-	outWallet := outWal.(types.WalletAccountImporter)
-	for _, e := range ww.entries {
-		if _, err := outWallet.ImportAccount(context.Background(), e.name, e.secretKey.Marshal(), []byte(e.passphrase)); err != nil {
-			return err
-		}
+	encryptor := keystorev4.New()
+	id, err := uuid.NewRandom()
+	if err != nil {
+		return err
+	}
+	cryptoFields, err := encryptor.Encrypt(storeBytes, prysmPass)
+	if err != nil {
+		return err
+	}
+	data := make(map[string]interface{})
+	data["uuid"] = id.String()
+	data["version"] = 4
+	data["crypto"] = cryptoFields
+	encodedStore, err := json.MarshalIndent(data, "", "\t")
+	if err != nil {
+		return err
 	}
 
-	// write a json configuration to specify accounts and passwords
-	keyManagerOpts := KeyManagerOpts{Location: keyMngWalletLoc}
-	for _, e := range ww.entries {
-		keyManagerOpts.Passphrases = append(keyManagerOpts.Passphrases, e.passphrase)
-	}
-	// TODO: temporary hack, we should change to keystore-centric approach.
-	// The prysm account matching of ethdo account names seems broken, use just the wallet name as a catch-all instead.
-	keyManagerOpts.Accounts = append(keyManagerOpts.Accounts, walletName)
-	optsData, err := json.Marshal(&keyManagerOpts)
-	if err != nil {
+	if err := ioutil.WriteFile(path.Join(outPath, "all-accounts.keystore.json"), encodedStore, 0644); err != nil {
 		return err
 	}
-	if err := ioutil.WriteFile(path.Join(outPath, "keymanager_opts.json"), optsData, 0644); err != nil {
+	if err := ioutil.WriteFile(path.Join(outPath, "keymanageropts.json"), []byte(`{"direct_eip_version": "EIP-2335"}`), 0644); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (ww *WalletWriter) WriteOutputs(filepath string, keyMngWalletLoc string) error {
+func (ww *WalletWriter) WriteOutputs(filepath string, prysmPass string) error {
 	if _, err := os.Stat(filepath); !os.IsNotExist(err) {
 		return errors.New("output for assignments already exists! Aborting")
 	}
@@ -281,7 +281,7 @@ func (ww *WalletWriter) WriteOutputs(filepath string, keyMngWalletLoc string) er
 	}
 
 	// For Prysm: write outputs as a wallet and a configuration
-	if err := ww.buildPrysmWallet(path.Join(filepath, "prysm"), keyMngWalletLoc); err != nil {
+	if err := ww.buildPrysmWallet(path.Join(filepath, "prysm"), prysmPass); err != nil {
 		return err
 	}
 	return nil
@@ -317,7 +317,7 @@ func walletFromMnemonic(mnemonic string) (types.Wallet, error) {
 
 func keystoresCommand() *cobra.Command {
 
-	var keyMngWalletLoc string
+	var prysmPass string
 
 	var outputDataPath string
 
@@ -339,10 +339,10 @@ func keystoresCommand() *cobra.Command {
 
 			ww := &WalletWriter{}
 			checkErr(selectVals(context.Background(), walletProv, accountMin, accountMax, ww), "failed to assign validators")
-			checkErr(ww.WriteOutputs(outputDataPath, keyMngWalletLoc), "failed to write output")
+			checkErr(ww.WriteOutputs(outputDataPath, prysmPass), "failed to write output")
 		},
 	}
-	cmd.Flags().StringVar(&keyMngWalletLoc, "key-man-loc", "", "Location to write to the 'location' field in the keymanager_opts.json file (Prysm only)")
+	cmd.Flags().StringVar(&prysmPass, "prysm-pass", "", "Password for all-accounts keystore file (Prysm only)")
 
 	cmd.Flags().StringVar(&outputDataPath, "out-loc", "assigned_data", "Path of the output data for the host, where wallets, keys, secrets dir, etc. are written")
 

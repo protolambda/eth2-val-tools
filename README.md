@@ -38,8 +38,8 @@ Usage:
   eth2-val-tools keystores [flags]
 
 Flags:
-      --key-man-loc string       Location to write to the 'location' field in the keymanager_opts.json file (Prysm only)
       --out-loc string           Path of the output data for the host, where wallets, keys, secrets dir, etc. are written (default "assigned_data")
+      --prysm-pass string        Password for all-accounts keystore file (Prysm only)
       --source-max uint          Maximum validator index in HD path range (excl.)
       --source-min uint          Minimum validator index in HD path range (incl.)
       --source-mnemonic string   The validators mnemonic to source account keys from.
