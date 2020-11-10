@@ -29,34 +29,20 @@ For automatic validator assignment, tracking and deployment, use the `assign` co
 
 ## Commands
 
-### `assign`
+### `keystores`
 
-This keeps track of validator assignments in a json file, protected from concurrent use with a lock file.
-
-You can then make assignments of `n` validators, generating a wallet to use on the host the validators were assigned to.
-
-The sourced accounts are from a validators-mnemonic and a specified range of accounts.
-
-See `example_assign.sh` for an example.
+Builds keystores/secrets in every format, for a given mnemonic and account range.
 
 ```
-Assign `n` available validators to `hostname`. If --add is true, it will add `n` assigned validators, instead of filling up to `n` total assigned to the host
-
 Usage:
-  eth2-val-tools assign [flags]
+  eth2-val-tools keystores [flags]
 
 Flags:
-      --add                       If the assignment should add to the existing assignment
-      --assignments string        Path of the current assignments to adjust (default "assignments.json")
-      --config-base-path string   Location to use as base in the config file (Teku only) (default "/data")
-  -n, --count uint                Amount of validators to assign
-  -h, --help                      help for assign
-      --hostname string           Unique name of the remote host to assign validators to (default "morty")
-      --key-man-loc string        Location to write to the 'location' field in the keymanager_opts.json file (Prysm only)
-      --out-loc string            Path of the output data for the host, where wallets, keys, secrets dir, etc. are written (default "assigned_data")
-      --source-max uint           Maximum validator index in HD path range (excl.)
-      --source-min uint           Minimum validator index in HD path range (incl.)
-      --source-mnemonic string    The validators mnemonic to source account keys from. Comma separated to use multiple.
+      --key-man-loc string       Location to write to the 'location' field in the keymanager_opts.json file (Prysm only)
+      --out-loc string           Path of the output data for the host, where wallets, keys, secrets dir, etc. are written (default "assigned_data")
+      --source-max uint          Maximum validator index in HD path range (excl.)
+      --source-min uint          Minimum validator index in HD path range (incl.)
+      --source-mnemonic string   The validators mnemonic to source account keys from.
 ```
 
 ### `mnemonic`

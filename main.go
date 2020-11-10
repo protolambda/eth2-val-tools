@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	filelock "github.com/MichaelS11/go-file-lock"
 	"github.com/google/uuid"
 	hbls "github.com/herumi/bls-eth-go-binary/bls"
 	"github.com/protolambda/zrnt/eth2/beacon"
@@ -24,13 +23,10 @@ import (
 	filesystem "github.com/wealdtech/go-eth2-wallet-store-filesystem"
 	scratch "github.com/wealdtech/go-eth2-wallet-store-scratch"
 	types "github.com/wealdtech/go-eth2-wallet-types/v2"
-	"gopkg.in/yaml.v2"
 	"io/ioutil"
 	"os"
 	"path"
-	"sort"
 	"strings"
-	"time"
 )
 
 func init() {
@@ -40,111 +36,6 @@ func init() {
 
 func validatorKeyName(i uint64) string {
 	return fmt.Sprintf("m/12381/3600/%d/0/0", i)
-}
-
-type ValidatorAssignEntry struct {
-	// Pubkey of validator, must be unique across store for current assignments
-	Pubkey string `json:"pubkey"`
-	// Host is the current remote assignment of the validator
-	Host string `json:"host"`
-	// Time of assignment
-	Time string `json:"assignment_time"`
-	// Path, the account path, e.g. "m/12381/3600/123/0/0"
-	Path string `json:"path"`
-	// source of account data
-	w types.WalletAccountByNameProvider
-}
-
-type ValidatorAssignments struct {
-	// Historical assignments. Never forget where a key was hosted, unless manually removed.
-	// Important for troubleshooting and debugging
-	HistoricalAssignments []ValidatorAssignEntry `json:"historical_assignments"`
-	// CurrentAssignments is an array instead of a map, to avoid random sorting
-	CurrentAssignments []ValidatorAssignEntry `json:"current_assignments"`
-}
-
-type AssignmentsView struct {
-	Assignments *ValidatorAssignments
-	filepath    string
-	lock        *filelock.LockHandle
-}
-
-func (v *AssignmentsView) Unlock() error {
-	return v.lock.Unlock()
-}
-
-func (v *AssignmentsView) Write() error {
-	// avoid writing null, just write empty lists
-	if v.Assignments.HistoricalAssignments == nil {
-		v.Assignments.HistoricalAssignments = make([]ValidatorAssignEntry, 0)
-	}
-	if v.Assignments.CurrentAssignments == nil {
-		v.Assignments.CurrentAssignments = make([]ValidatorAssignEntry, 0)
-	}
-	data, err := json.Marshal(v.Assignments)
-	if err != nil {
-		return err
-	}
-	return ioutil.WriteFile(v.filepath, data, 0644)
-}
-
-func LoadAssignments(filepath string) (*AssignmentsView, error) {
-	// acquire file lock over assignments, we need to be very strict about not double writing, or reading concurrently
-	var lock *filelock.LockHandle
-	for {
-		var err error
-		lock, err = filelock.New(filepath + ".lock")
-		if err != nil && err == filelock.ErrFileIsBeingUsed {
-			time.Sleep(time.Second * 2)
-			continue
-		}
-		if err != nil {
-			return nil, fmt.Errorf("failed to acquire lock: %v", err)
-		}
-		break
-	}
-
-	var obj ValidatorAssignments
-	f, err := os.OpenFile(filepath, os.O_RDONLY|os.O_CREATE, 0644)
-	if err != nil {
-		_ = lock.Unlock()
-		return nil, err
-	}
-	defer f.Close()
-	st, err := f.Stat()
-	if err != nil {
-		_ = lock.Unlock()
-		return nil, err
-	}
-	if st.IsDir() {
-		_ = lock.Unlock()
-		return nil, errors.New("assignments is dir, invalid usage")
-	}
-	if st.Size() > 0 {
-		dec := json.NewDecoder(f)
-		if err := dec.Decode(&obj); err != nil {
-			_ = lock.Unlock()
-			return nil, err
-		}
-	} else {
-		//os.Exit(1)
-	}
-	return &AssignmentsView{
-		Assignments: &obj,
-		filepath:    filepath,
-		lock:        lock,
-	}, nil
-}
-
-func storeWithOptions(pass string, loc string) types.Store {
-	storeOpts := make([]filesystem.Option, 0)
-	if pass != "" {
-		storeOpts = append(storeOpts, filesystem.WithPassphrase([]byte(pass)))
-	}
-	if loc != "" {
-		storeOpts = append(storeOpts, filesystem.WithLocation(loc))
-	}
-	return filesystem.New(storeOpts...)
 }
 
 type WalletOutput interface {
@@ -277,12 +168,7 @@ func (ww *WalletWriter) buildPrysmWallet(outPath string, keyMngWalletLoc string)
 	return nil
 }
 
-type TekuConfig struct {
-	ValidatorsKeyFiles      []string `yaml:"validators-key-files"`
-	ValidatorsPasswordFiles []string `yaml:"validators-key-password-files"`
-}
-
-func (ww *WalletWriter) WriteOutputs(filepath string, keyMngWalletLoc string, configBasePath string) error {
+func (ww *WalletWriter) WriteOutputs(filepath string, keyMngWalletLoc string) error {
 	if _, err := os.Stat(filepath); !os.IsNotExist(err) {
 		return errors.New("output for assignments already exists! Aborting")
 	}
@@ -290,48 +176,55 @@ func (ww *WalletWriter) WriteOutputs(filepath string, keyMngWalletLoc string, co
 		return err
 	}
 	// What lighthouse requires as file name
-	keyfileName := "voting-keystore.json"
-	keyfilesPath := path.Join(filepath, "keys")
-	if err := os.Mkdir(keyfilesPath, os.ModePerm); err != nil {
+	lighthouseKeyfileName := "voting-keystore.json"
+	lighthouseKeyfilesPath := path.Join(filepath, "keys")
+	if err := os.Mkdir(lighthouseKeyfilesPath, os.ModePerm); err != nil {
+		return err
+	}
+	// nimbus has different keystore names
+	nimbusKeyfileName := "keystore.json"
+	nimbusKeyfilesPath := path.Join(filepath, "nimbus-keys")
+	if err := os.Mkdir(nimbusKeyfilesPath, os.ModePerm); err != nil {
+		return err
+	}
+	// teku does not nest their keystores
+	tekuKeyfilesPath := path.Join(filepath, "teku-keys")
+	if err := os.Mkdir(tekuKeyfilesPath, os.ModePerm); err != nil {
 		return err
 	}
 	// For all: write JSON keystore files, each in their own directory (lighthouse requirement)
 	for _, e := range ww.entries {
-		keyDirPath := path.Join(keyfilesPath, e.PubHex())
-		if err := os.MkdirAll(keyDirPath, os.ModePerm); err != nil {
-			return err
-		}
 		dat, err := e.MarshalJSON()
 		if err != nil {
 			return err
 		}
-		if err := ioutil.WriteFile(path.Join(keyDirPath, keyfileName), dat, 0644); err != nil {
-			return err
-		}
-	}
-	{
-		// nimbus has different keystore names
-		keyfileName := "keystore.json"
-		keyfilesPath := path.Join(filepath, "nimbus-keys")
-		if err := os.Mkdir(keyfilesPath, os.ModePerm); err != nil {
-			return err
-		}
-		// For all: write JSON keystore files, each in their own directory
-		for _, e := range ww.entries {
-			keyDirPath := path.Join(keyfilesPath, e.PubHex())
+		{
+			// lighthouse
+			keyDirPath := path.Join(lighthouseKeyfilesPath, e.PubHex())
 			if err := os.MkdirAll(keyDirPath, os.ModePerm); err != nil {
 				return err
 			}
-			dat, err := e.MarshalJSON()
-			if err != nil {
+			if err := ioutil.WriteFile(path.Join(keyDirPath, lighthouseKeyfileName), dat, 0644); err != nil {
 				return err
 			}
-			if err := ioutil.WriteFile(path.Join(keyDirPath, keyfileName), dat, 0644); err != nil {
+		}
+		{
+			// nimbus
+			keyDirPath := path.Join(nimbusKeyfilesPath, e.PubHex())
+			if err := os.MkdirAll(keyDirPath, os.ModePerm); err != nil {
+				return err
+			}
+			if err := ioutil.WriteFile(path.Join(keyDirPath, nimbusKeyfileName), dat, 0644); err != nil {
+				return err
+			}
+		}
+		{
+			// teku
+			if err := ioutil.WriteFile(path.Join(tekuKeyfilesPath, e.PubHex()+".json"), dat, 0644); err != nil {
 				return err
 			}
 		}
 	}
-
 	{
 		// For Lighthouse: they need a directory that maps pubkey to passwords, one per file
 		secretsDirPath := path.Join(filepath, "secrets")
@@ -341,6 +234,20 @@ func (ww *WalletWriter) WriteOutputs(filepath string, keyMngWalletLoc string, co
 		for _, e := range ww.entries {
 			pubHex := e.PubHex()
 			if err := ioutil.WriteFile(path.Join(secretsDirPath, pubHex), []byte(e.passphrase), 0644); err != nil {
+				return err
+			}
+		}
+	}
+
+	{
+		// For Teku: they need a directory that maps name of keystore dir to name of secret file, but secret files end with `.txt`
+		secretsDirPath := path.Join(filepath, "teku-secrets")
+		if err := os.Mkdir(secretsDirPath, os.ModePerm); err != nil {
+			return err
+		}
+		for _, e := range ww.entries {
+			pubHex := e.PubHex()
+			if err := ioutil.WriteFile(path.Join(secretsDirPath, pubHex+".txt"), []byte(e.passphrase), 0644); err != nil {
 				return err
 			}
 		}
@@ -360,19 +267,6 @@ func (ww *WalletWriter) WriteOutputs(filepath string, keyMngWalletLoc string, co
 		}
 	}
 
-	// For Teku: a yaml config file pointing to each key and secret
-	tekuConfig := TekuConfig{
-		ValidatorsKeyFiles:      make([]string, 0), // we don't want null arrays
-		ValidatorsPasswordFiles: make([]string, 0),
-	}
-	for _, e := range ww.entries {
-		tekuConfig.ValidatorsKeyFiles = append(tekuConfig.ValidatorsKeyFiles, path.Join(configBasePath, "keys", e.PubHex(), keyfileName))
-		tekuConfig.ValidatorsPasswordFiles = append(tekuConfig.ValidatorsPasswordFiles, path.Join(configBasePath, "secrets", e.PubHex()))
-	}
-	tekuConfData, err := yaml.Marshal(&tekuConfig)
-	if err := ioutil.WriteFile(path.Join(filepath, "teku_validators_config.yaml"), tekuConfData, 0644); err != nil {
-		return err
-	}
 	// In general: a list of pubkeys.
 	pubkeys := make([]string, 0)
 	for _, e := range ww.entries {
@@ -421,10 +315,9 @@ func walletFromMnemonic(mnemonic string) (types.Wallet, error) {
 	return wallet, nil
 }
 
-func assignCommand() *cobra.Command {
+func keystoresCommand() *cobra.Command {
 
 	var keyMngWalletLoc string
-	var configBasePath string
 
 	var outputDataPath string
 
@@ -433,44 +326,31 @@ func assignCommand() *cobra.Command {
 	var accountMin uint64
 	var accountMax uint64
 
-	var assignmentsLoc string
-	var hostname string
-	var count uint64
-	var addCount bool
-
 	cmd := &cobra.Command{
-		Use:   "assign",
-		Short: "Assign `n` available validators to `hostname`. If --add is true, it will add `n` assigned validators, instead of filling up to `n` total assigned to the host",
+		Use:   "keystores",
+		Short: "Build range of keystores for any target format",
 		Args:  cobra.NoArgs,
 		Run: func(cmd *cobra.Command, args []string) {
 			checkErr := makeCheckErr(cmd)
-			var wallets []types.WalletAccountByNameProvider
-			for i, mnemonic := range strings.Split(sourceMnemonic, ",") {
-				wallet, err := walletFromMnemonic(mnemonic)
-				checkErr(err, fmt.Sprintf("could not create scratch wallet from mnemonic %d", i))
-				wallets = append(wallets, wallet.(types.WalletAccountByNameProvider))
-			}
+			wallet, err := walletFromMnemonic(sourceMnemonic)
+			checkErr(err, "could not create scratch wallet from mnemonic")
+
+			walletProv := wallet.(types.WalletAccountByNameProvider)
 
 			ww := &WalletWriter{}
-			checkErr(assignVals(context.Background(), wallets,
-				accountMin, accountMax, ww, assignmentsLoc, hostname, count, addCount), "failed to assign validators")
-			checkErr(ww.WriteOutputs(outputDataPath, keyMngWalletLoc, configBasePath), "failed to write output")
+			checkErr(selectVals(context.Background(), walletProv, accountMin, accountMax, ww), "failed to assign validators")
+			checkErr(ww.WriteOutputs(outputDataPath, keyMngWalletLoc), "failed to write output")
 		},
 	}
 	cmd.Flags().StringVar(&keyMngWalletLoc, "key-man-loc", "", "Location to write to the 'location' field in the keymanager_opts.json file (Prysm only)")
-	cmd.Flags().StringVar(&configBasePath, "config-base-path", "/data", "Location to use as base in the config file (Teku only)")
 
 	cmd.Flags().StringVar(&outputDataPath, "out-loc", "assigned_data", "Path of the output data for the host, where wallets, keys, secrets dir, etc. are written")
 
-	cmd.Flags().StringVar(&sourceMnemonic, "source-mnemonic", "", "The validators mnemonic to source account keys from. Comma separated to use multiple.")
+	cmd.Flags().StringVar(&sourceMnemonic, "source-mnemonic", "", "The validators mnemonic to source account keys from.")
 
 	cmd.Flags().Uint64Var(&accountMin, "source-min", 0, "Minimum validator index in HD path range (incl.)")
 	cmd.Flags().Uint64Var(&accountMax, "source-max", 0, "Maximum validator index in HD path range (excl.)")
 
-	cmd.Flags().StringVar(&assignmentsLoc, "assignments", "assignments.json", "Path of the current assignments to adjust")
-	cmd.Flags().StringVar(&hostname, "hostname", "morty", "Unique name of the remote host to assign validators to")
-	cmd.Flags().Uint64VarP(&count, "count", "n", 0, "Amount of validators to assign")
-	cmd.Flags().BoolVar(&addCount, "add", false, "If the assignment should add to the existing assignment")
 
 	return cmd
 }
@@ -480,155 +360,43 @@ func narrowedPubkey(pub string) string {
 	return strings.TrimPrefix(strings.ToLower(pub), "0x")
 }
 
-func assignVals(ctx context.Context,
-	wallets []types.WalletAccountByNameProvider,
+func selectVals(ctx context.Context,
+	wallet types.WalletAccountByNameProvider,
 	minAcc uint64, maxAcc uint64,
-	output WalletOutput,
-	assignmentsPath string, hostname string, n uint64, addAssignments bool) error {
+	output WalletOutput) error {
 
-	va, err := LoadAssignments(assignmentsPath)
-	if err != nil {
-		return err
-	}
 
-	err = func() error {
-		var prevAssignedToHost []ValidatorAssignEntry
-		var prevAssignedToOther []ValidatorAssignEntry
-		assignedPubkeys := make(map[string]struct{})
-		for _, a := range va.Assignments.CurrentAssignments {
-			pub := narrowedPubkey(a.Pubkey)
-			// Check that there are no duplicate pubkeys in the previous store
-			_, exists := assignedPubkeys[pub]
-			if exists {
-				return errors.New("DANGER !!!: current assignments contain duplicate pubkey\n")
+	// Try look for unassigned accounts in the wallet
+	for i := minAcc; i < maxAcc; i++ {
+		name := validatorKeyName(i)
+		a, err := wallet.AccountByName(ctx, name)
+		if err != nil {
+			fmt.Printf("Account %s cannot be opened, continuing to next account.\n", name)
+			continue
+		}
+		pubkey := narrowedPubkey(hex.EncodeToString(a.PublicKey().Marshal()))
+		if aLocked, ok := a.(types.AccountLocker); ok {
+			if err := aLocked.Unlock(ctx, []byte{}); err != nil {
+				return fmt.Errorf("failed to unlock priv key for account %s with pubkey %s: %v", a.ID().String(), pubkey, err)
 			}
-			assignedPubkeys[pub] = struct{}{}
-			if a.Host == hostname {
-				prevAssignedToHost = append(prevAssignedToHost, a)
+		}
+		aPriv, ok := a.(types.AccountPrivateKeyProvider)
+		if !ok {
+			return fmt.Errorf("cannot get priv key for account %s with pubkey %s", a.ID().String(), pubkey)
+		}
+		priv, err := aPriv.PrivateKey(ctx)
+		if err != nil {
+			return fmt.Errorf("cannot read priv key for account %s with pubkey %s: %v", a.ID().String(), pubkey, err)
+		}
+		if err := output.InsertAccount(priv); err != nil {
+			if err.Error() == fmt.Sprintf("account with name \"%s\" already exists", pubkey) {
+				fmt.Printf("Account with pubkey %s already exists in output wallet, skipping it\n", pubkey)
 			} else {
-				prevAssignedToOther = append(prevAssignedToOther, a)
+				return fmt.Errorf("failed to import account %s with pubkey %s into output wallet: %v", a.ID().String(), pubkey, err)
 			}
 		}
-
-		prevAssignedToHostCount := uint64(len(prevAssignedToHost))
-
-		var newAssignedToHost []ValidatorAssignEntry
-
-		var toAssign uint64
-		if addAssignments {
-			newAssignedToHost = prevAssignedToHost
-			toAssign = n
-		} else {
-			if n < prevAssignedToHostCount {
-				// remove assignment
-				va.Assignments.HistoricalAssignments = append(va.Assignments.HistoricalAssignments, prevAssignedToHost[n:]...)
-				newAssignedToHost = prevAssignedToHost[:n]
-				toAssign = 0
-			} else {
-				newAssignedToHost = prevAssignedToHost
-				toAssign = n - prevAssignedToHostCount
-			}
-		}
-
-		fmt.Printf("keeping %d/%d previous assignments to host (excl %d for others), and adding %d for total of %d assigned to \"%s\"\n",
-			len(newAssignedToHost), prevAssignedToHostCount, len(prevAssignedToOther), toAssign, prevAssignedToHostCount+toAssign, hostname)
-
-		assignmentTime := fmt.Sprintf("%d", time.Now().Unix())
-
-		accountCount := 0
-		if toAssign > 0 {
-			for _, w := range wallets {
-				// Try look for unassigned accounts in the wallet
-				for i := minAcc; i < maxAcc; i++ {
-					name := validatorKeyName(i)
-					a, err := w.AccountByName(ctx, name)
-					if err != nil {
-						fmt.Printf("Account %s cannot be opened, continuing to next account.\n", name)
-						continue
-					}
-					accountCount += 1
-					pubkey := narrowedPubkey(hex.EncodeToString(a.PublicKey().Marshal()))
-					// Add the account if it is not already assigned
-					if _, ok := assignedPubkeys[pubkey]; !ok {
-						fmt.Printf("Assigning account %s with pub %s\n", a.Name(), pubkey)
-						assignedPubkeys[pubkey] = struct{}{}
-
-						newAssignedToHost = append(newAssignedToHost, ValidatorAssignEntry{
-							Pubkey:     pubkey,
-							Host:       hostname,
-							Time:       assignmentTime,
-							Path:       name,
-							w:          w,
-						})
-						toAssign -= 1
-					}
-					if toAssign == 0 {
-						break
-					}
-				}
-			}
-		}
-
-		fmt.Printf("Read %d accounts from wallet to find as many unassigned accounts as needed. Can assign %d to host\n", accountCount, len(newAssignedToHost))
-
-		// keep previous assignments to other hosts, along with new set of assignments for new host
-		va.Assignments.CurrentAssignments = append(prevAssignedToOther, newAssignedToHost...)
-
-		// sort by host, then pubkey
-		sort.Slice(va.Assignments.CurrentAssignments, func(i, j int) bool {
-			a := va.Assignments.CurrentAssignments[i]
-			b := va.Assignments.CurrentAssignments[j]
-			hostCmp := strings.Compare(a.Host, b.Host)
-			if hostCmp == 0 {
-				return strings.Compare(a.Pubkey, b.Pubkey) < 0
-			}
-			return hostCmp < 0
-		})
-
-		// Write new key store for current assignments to host
-		for _, entry := range newAssignedToHost {
-			a, err := entry.w.AccountByName(ctx, entry.Path)
-			if err != nil {
-				return fmt.Errorf("cannot find wallet account for assignment, path: %s, pub: %s", entry.Path, entry.Pubkey)
-			}
-			if aLocked, ok := a.(types.AccountLocker); ok {
-				if err := aLocked.Unlock(ctx, []byte{}); err != nil {
-					return fmt.Errorf("failed to unlock priv key for account %s with pubkey %s: %v", a.ID().String(), entry.Pubkey, err)
-				}
-			}
-			aPriv, ok := a.(types.AccountPrivateKeyProvider)
-			if !ok {
-				return fmt.Errorf("cannot get priv key for account %s with pubkey %s", a.ID().String(), entry.Pubkey)
-			}
-			priv, err := aPriv.PrivateKey(ctx)
-			if err != nil {
-				return fmt.Errorf("cannot read priv key for account %s with pubkey %s: %v", a.ID().String(), entry.Pubkey, err)
-			}
-			// account names must be prefixed with wallet name
-			if err := output.InsertAccount(priv); err != nil {
-				if err.Error() == fmt.Sprintf("account with name \"%s\" already exists", entry.Pubkey) {
-					fmt.Printf("Account with pubkey %s already exists in output wallet, skipping it\n", entry.Pubkey)
-				} else {
-					return fmt.Errorf("failed to import account %s with pubkey %s into output wallet: %v", a.ID().String(), entry.Pubkey, err)
-				}
-			}
-		}
-		return nil
-	}()
-
-	if err != nil {
-		// just unlock, but no writes
-		_ = va.Unlock()
-		return err
 	}
-
-	if err := va.Write(); err != nil {
-		// Keep it locked, something went wrong during write. Can be dangerous for concurrent use, have the user look at it.
-		return fmt.Errorf("failed to write assignments file! Keeping file lock! %v", err)
-	}
-
-	// Success, new assignments written and ready for use
-	return va.Unlock()
+	return nil
 }
 
 func createMnemonicCmd() *cobra.Command {
@@ -788,7 +556,7 @@ func main() {
 			_ = cmd.Help()
 		},
 	}
-	rootCmd.AddCommand(assignCommand())
+	rootCmd.AddCommand(keystoresCommand())
 	rootCmd.AddCommand(createMnemonicCmd())
 	rootCmd.AddCommand(createDepositDatasCmd())
 	rootCmd.AddCommand(createPubkeysCmd())
