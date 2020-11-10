@@ -56,8 +56,7 @@ Flags:
       --out-loc string            Path of the output data for the host, where wallets, keys, secrets dir, etc. are written (default "assigned_data")
       --source-max uint           Maximum validator index in HD path range (excl.)
       --source-min uint           Minimum validator index in HD path range (incl.)
-      --source-mnemonic string    The validators mnemonic to source account keys from
-      --wallet-name string        Name of the wallet, to tag accounts with in the assignments file (default "unknown imported wallet")
+      --source-mnemonic string    The validators mnemonic to source account keys from. Comma separated to use multiple.
 ```
 
 ### `mnemonic`

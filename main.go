@@ -51,8 +51,8 @@ type ValidatorAssignEntry struct {
 	Time string `json:"assignment_time"`
 	// Path, the account path, e.g. "m/12381/3600/123/0/0"
 	Path string `json:"path"`
-	// WalletName, Where the account comes from
-	WalletName string
+	// source of account data
+	w types.WalletAccountByNameProvider
 }
 
 type ValidatorAssignments struct {
@@ -409,7 +409,7 @@ func walletFromMnemonic(mnemonic string) (types.Wallet, error) {
 	store := scratch.New()
 	encryptor := keystorev4.New()
 
-	seed := bip39.NewSeed(mnemonic, "")
+	seed := bip39.NewSeed(strings.TrimSpace(mnemonic), "")
 	wallet, err := hd.CreateWallet(context.Background(), "imported wallet", []byte{}, store, encryptor, seed)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create scratch wallet from seed: %v", err)
@@ -438,19 +438,21 @@ func assignCommand() *cobra.Command {
 	var count uint64
 	var addCount bool
 
-	var walletName string
-
 	cmd := &cobra.Command{
 		Use:   "assign",
 		Short: "Assign `n` available validators to `hostname`. If --add is true, it will add `n` assigned validators, instead of filling up to `n` total assigned to the host",
 		Args:  cobra.NoArgs,
 		Run: func(cmd *cobra.Command, args []string) {
 			checkErr := makeCheckErr(cmd)
-			wallet, err := walletFromMnemonic(sourceMnemonic)
-			checkErr(err, "could not create scratch wallet from mnemonic")
+			var wallets []types.WalletAccountByNameProvider
+			for i, mnemonic := range strings.Split(sourceMnemonic, ",") {
+				wallet, err := walletFromMnemonic(mnemonic)
+				checkErr(err, fmt.Sprintf("could not create scratch wallet from mnemonic %d", i))
+				wallets = append(wallets, wallet.(types.WalletAccountByNameProvider))
+			}
 
 			ww := &WalletWriter{}
-			checkErr(assignVals(context.Background(), wallet.(types.WalletAccountByNameProvider), walletName,
+			checkErr(assignVals(context.Background(), wallets,
 				accountMin, accountMax, ww, assignmentsLoc, hostname, count, addCount), "failed to assign validators")
 			checkErr(ww.WriteOutputs(outputDataPath, keyMngWalletLoc, configBasePath), "failed to write output")
 		},
@@ -460,7 +462,7 @@ func assignCommand() *cobra.Command {
 
 	cmd.Flags().StringVar(&outputDataPath, "out-loc", "assigned_data", "Path of the output data for the host, where wallets, keys, secrets dir, etc. are written")
 
-	cmd.Flags().StringVar(&sourceMnemonic, "source-mnemonic", "", "The validators mnemonic to source account keys from")
+	cmd.Flags().StringVar(&sourceMnemonic, "source-mnemonic", "", "The validators mnemonic to source account keys from. Comma separated to use multiple.")
 
 	cmd.Flags().Uint64Var(&accountMin, "source-min", 0, "Minimum validator index in HD path range (incl.)")
 	cmd.Flags().Uint64Var(&accountMax, "source-max", 0, "Maximum validator index in HD path range (excl.)")
@@ -469,7 +471,6 @@ func assignCommand() *cobra.Command {
 	cmd.Flags().StringVar(&hostname, "hostname", "morty", "Unique name of the remote host to assign validators to")
 	cmd.Flags().Uint64VarP(&count, "count", "n", 0, "Amount of validators to assign")
 	cmd.Flags().BoolVar(&addCount, "add", false, "If the assignment should add to the existing assignment")
-	cmd.Flags().StringVar(&walletName, "wallet-name", "unknown imported wallet", "Name of the wallet, to tag accounts with in the assignments file")
 
 	return cmd
 }
@@ -480,7 +481,7 @@ func narrowedPubkey(pub string) string {
 }
 
 func assignVals(ctx context.Context,
-	wallet types.WalletAccountByNameProvider, walletName string,
+	wallets []types.WalletAccountByNameProvider,
 	minAcc uint64, maxAcc uint64,
 	output WalletOutput,
 	assignmentsPath string, hostname string, n uint64, addAssignments bool) error {
@@ -536,32 +537,34 @@ func assignVals(ctx context.Context,
 
 		accountCount := 0
 		if toAssign > 0 {
-			// Try look for unassigned accounts in the wallet
-			for i := minAcc; i < maxAcc; i++ {
-				name := validatorKeyName(i)
-				a, err := wallet.AccountByName(ctx, name)
-				if err != nil {
-					fmt.Printf("Account %s cannot be opened, continuing to next account.\n", name)
-					continue
-				}
-				accountCount += 1
-				pubkey := narrowedPubkey(hex.EncodeToString(a.PublicKey().Marshal()))
-				// Add the account if it is not already assigned
-				if _, ok := assignedPubkeys[pubkey]; !ok {
-					fmt.Printf("Assigning account %s with pub %s\n", a.Name(), pubkey)
-					assignedPubkeys[pubkey] = struct{}{}
+			for _, w := range wallets {
+				// Try look for unassigned accounts in the wallet
+				for i := minAcc; i < maxAcc; i++ {
+					name := validatorKeyName(i)
+					a, err := w.AccountByName(ctx, name)
+					if err != nil {
+						fmt.Printf("Account %s cannot be opened, continuing to next account.\n", name)
+						continue
+					}
+					accountCount += 1
+					pubkey := narrowedPubkey(hex.EncodeToString(a.PublicKey().Marshal()))
+					// Add the account if it is not already assigned
+					if _, ok := assignedPubkeys[pubkey]; !ok {
+						fmt.Printf("Assigning account %s with pub %s\n", a.Name(), pubkey)
+						assignedPubkeys[pubkey] = struct{}{}
 
-					newAssignedToHost = append(newAssignedToHost, ValidatorAssignEntry{
-						Pubkey:     pubkey,
-						Host:       hostname,
-						Time:       assignmentTime,
-						Path:       name,
-						WalletName: walletName,
-					})
-					toAssign -= 1
-				}
-				if toAssign == 0 {
-					break
+						newAssignedToHost = append(newAssignedToHost, ValidatorAssignEntry{
+							Pubkey:     pubkey,
+							Host:       hostname,
+							Time:       assignmentTime,
+							Path:       name,
+							w:          w,
+						})
+						toAssign -= 1
+					}
+					if toAssign == 0 {
+						break
+					}
 				}
 			}
 		}
@@ -584,7 +587,7 @@ func assignVals(ctx context.Context,
 
 		// Write new key store for current assignments to host
 		for _, entry := range newAssignedToHost {
-			a, err := wallet.AccountByName(ctx, entry.Path)
+			a, err := entry.w.AccountByName(ctx, entry.Path)
 			if err != nil {
 				return fmt.Errorf("cannot find wallet account for assignment, path: %s, pub: %s", entry.Path, entry.Pubkey)
 			}
@@ -720,7 +723,7 @@ func createDepositDatasCmd() *cobra.Command {
 					"version":                1, // ethereal cli requirement
 				}
 				jsonStr, err := json.Marshal(jsonData)
-				if asJsonList && i + 1 < accountMax {
+				if asJsonList && i+1 < accountMax {
 					jsonStr = append(jsonStr, ',')
 				}
 				checkErr(err, "could not encode deposit data to json")
