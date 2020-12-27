@@ -302,8 +302,11 @@ func makeCheckErr(cmd *cobra.Command) func(err error, msg string) {
 func walletFromMnemonic(mnemonic string) (types.Wallet, error) {
 	store := scratch.New()
 	encryptor := keystorev4.New()
-
-	seed := bip39.NewSeed(strings.TrimSpace(mnemonic), "")
+	mnemonic = strings.TrimSpace(mnemonic)
+	if !bip39.IsMnemonicValid(mnemonic) {
+		return nil, errors.New("mnemonic is not valid")
+	}
+	seed := bip39.NewSeed(mnemonic, "")
 	wallet, err := hd.CreateWallet(context.Background(), "imported wallet", []byte{}, store, encryptor, seed)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create scratch wallet from seed: %v", err)
@@ -351,7 +354,6 @@ func keystoresCommand() *cobra.Command {
 	cmd.Flags().Uint64Var(&accountMin, "source-min", 0, "Minimum validator index in HD path range (incl.)")
 	cmd.Flags().Uint64Var(&accountMax, "source-max", 0, "Maximum validator index in HD path range (excl.)")
 
-
 	return cmd
 }
 
@@ -364,7 +366,6 @@ func selectVals(ctx context.Context,
 	wallet types.WalletAccountByNameProvider,
 	minAcc uint64, maxAcc uint64,
 	output WalletOutput) error {
-
 
 	// Try look for unassigned accounts in the wallet
 	for i := minAcc; i < maxAcc; i++ {
