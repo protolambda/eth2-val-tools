@@ -8,6 +8,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/ioutil"
+	"os"
+	"path"
+	"path/filepath"
+	"strings"
+
 	"github.com/google/uuid"
 	hbls "github.com/herumi/bls-eth-go-binary/bls"
 	"github.com/protolambda/zrnt/eth2/beacon"
@@ -21,10 +27,6 @@ import (
 	hd "github.com/wealdtech/go-eth2-wallet-hd/v2"
 	scratch "github.com/wealdtech/go-eth2-wallet-store-scratch"
 	types "github.com/wealdtech/go-eth2-wallet-types/v2"
-	"io/ioutil"
-	"os"
-	"path"
-	"strings"
 )
 
 func init() {
@@ -124,14 +126,20 @@ func (ww *WalletWriter) buildPrysmWallet(outPath string, prysmPass string) error
 	if err := os.MkdirAll(outPath, os.ModePerm); err != nil {
 		return err
 	}
-	// a directory called "direct"
-	//  - keymanageropts.json
-	//      '{"direct_eip_version": "EIP-2335"}'
-	//  - all-accounts.keystore.json
-	//    - Prysm doesn't know what individual keystores are, only allowing you to import them with CLI, but not simply load them as accounts.
-	//    - All pubkeys/privkeys are put in two lists, encoded as JSON, and those bytes are then encrypted exactly like a single private key would be normally
-	//    - And then persisted in "all-accounts.keystore.json"
-
+	// Prysm wallet expects the following structure, assuming
+	// the output path is called `prysm`:
+	//  direct/
+	//    accounts/
+	//      all-accounts.keystore.json
+	//      - Prysm doesn't know what individual keystores are, only allowing you to import them with CLI, but not simply load them as accounts.
+	//      - All pubkeys/privkeys are put in two lists, encoded as JSON, and those bytes are then encrypted exactly like a single private key would be normally
+	//      - And then persisted in "all-accounts.keystore.json"
+	//  keymanageropts.json
+	//  - '{"direct_eip_version": "EIP-2335"}'
+	accountsKeystorePath := filepath.Join(outPath, "direct", "accounts")
+	if err := os.MkdirAll(accountsKeystorePath, os.ModePerm); err != nil {
+		return err
+	}
 	store := PrysmAccountStore{}
 	for _, e := range ww.entries {
 		store.PublicKeys = append(store.PublicKeys, e.publicKey.Marshal())
@@ -159,36 +167,36 @@ func (ww *WalletWriter) buildPrysmWallet(outPath string, prysmPass string) error
 		return err
 	}
 
-	if err := ioutil.WriteFile(path.Join(outPath, "all-accounts.keystore.json"), encodedStore, 0644); err != nil {
+	if err := ioutil.WriteFile(filepath.Join(accountsKeystorePath, "all-accounts.keystore.json"), encodedStore, 0644); err != nil {
 		return err
 	}
-	if err := ioutil.WriteFile(path.Join(outPath, "keymanageropts.json"), []byte(`{"direct_eip_version": "EIP-2335"}`), 0644); err != nil {
+	if err := ioutil.WriteFile(filepath.Join(outPath, "keymanageropts.json"), []byte(`{"direct_eip_version": "EIP-2335"}`), 0644); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (ww *WalletWriter) WriteOutputs(filepath string, prysmPass string) error {
-	if _, err := os.Stat(filepath); !os.IsNotExist(err) {
+func (ww *WalletWriter) WriteOutputs(fpath string, prysmPass string) error {
+	if _, err := os.Stat(fpath); !os.IsNotExist(err) {
 		return errors.New("output for assignments already exists! Aborting")
 	}
-	if err := os.MkdirAll(filepath, os.ModePerm); err != nil {
+	if err := os.MkdirAll(fpath, os.ModePerm); err != nil {
 		return err
 	}
 	// What lighthouse requires as file name
 	lighthouseKeyfileName := "voting-keystore.json"
-	lighthouseKeyfilesPath := path.Join(filepath, "keys")
+	lighthouseKeyfilesPath := filepath.Join(fpath, "keys")
 	if err := os.Mkdir(lighthouseKeyfilesPath, os.ModePerm); err != nil {
 		return err
 	}
 	// nimbus has different keystore names
 	nimbusKeyfileName := "keystore.json"
-	nimbusKeyfilesPath := path.Join(filepath, "nimbus-keys")
+	nimbusKeyfilesPath := filepath.Join(fpath, "nimbus-keys")
 	if err := os.Mkdir(nimbusKeyfilesPath, os.ModePerm); err != nil {
 		return err
 	}
 	// teku does not nest their keystores
-	tekuKeyfilesPath := path.Join(filepath, "teku-keys")
+	tekuKeyfilesPath := filepath.Join(fpath, "teku-keys")
 	if err := os.Mkdir(tekuKeyfilesPath, os.ModePerm); err != nil {
 		return err
 	}
@@ -200,34 +208,34 @@ func (ww *WalletWriter) WriteOutputs(filepath string, prysmPass string) error {
 		}
 		{
 			// lighthouse
-			keyDirPath := path.Join(lighthouseKeyfilesPath, e.PubHex())
+			keyDirPath := filepath.Join(lighthouseKeyfilesPath, e.PubHex())
 			if err := os.MkdirAll(keyDirPath, os.ModePerm); err != nil {
 				return err
 			}
-			if err := ioutil.WriteFile(path.Join(keyDirPath, lighthouseKeyfileName), dat, 0644); err != nil {
+			if err := ioutil.WriteFile(filepath.Join(keyDirPath, lighthouseKeyfileName), dat, 0644); err != nil {
 				return err
 			}
 		}
 		{
 			// nimbus
-			keyDirPath := path.Join(nimbusKeyfilesPath, e.PubHex())
+			keyDirPath := filepath.Join(nimbusKeyfilesPath, e.PubHex())
 			if err := os.MkdirAll(keyDirPath, os.ModePerm); err != nil {
 				return err
 			}
-			if err := ioutil.WriteFile(path.Join(keyDirPath, nimbusKeyfileName), dat, 0644); err != nil {
+			if err := ioutil.WriteFile(filepath.Join(keyDirPath, nimbusKeyfileName), dat, 0644); err != nil {
 				return err
 			}
 		}
 		{
 			// teku
-			if err := ioutil.WriteFile(path.Join(tekuKeyfilesPath, e.PubHex()+".json"), dat, 0644); err != nil {
+			if err := ioutil.WriteFile(filepath.Join(tekuKeyfilesPath, e.PubHex()+".json"), dat, 0644); err != nil {
 				return err
 			}
 		}
 	}
 	{
 		// For Lighthouse: they need a directory that maps pubkey to passwords, one per file
-		secretsDirPath := path.Join(filepath, "secrets")
+		secretsDirPath := filepath.Join(fpath, "secrets")
 		if err := os.Mkdir(secretsDirPath, os.ModePerm); err != nil {
 			return err
 		}
@@ -241,13 +249,13 @@ func (ww *WalletWriter) WriteOutputs(filepath string, prysmPass string) error {
 
 	{
 		// For Teku: they need a directory that maps name of keystore dir to name of secret file, but secret files end with `.txt`
-		secretsDirPath := path.Join(filepath, "teku-secrets")
+		secretsDirPath := filepath.Join(fpath, "teku-secrets")
 		if err := os.Mkdir(secretsDirPath, os.ModePerm); err != nil {
 			return err
 		}
 		for _, e := range ww.entries {
 			pubHex := e.PubHex()
-			if err := ioutil.WriteFile(path.Join(secretsDirPath, pubHex+".txt"), []byte(e.passphrase), 0644); err != nil {
+			if err := ioutil.WriteFile(filepath.Join(secretsDirPath, pubHex+".txt"), []byte(e.passphrase), 0644); err != nil {
 				return err
 			}
 		}
@@ -255,13 +263,13 @@ func (ww *WalletWriter) WriteOutputs(filepath string, prysmPass string) error {
 
 	{
 		// For Lodestar: they need a directory that maps pubkey to passwords, one per file, but no 0x prefix.
-		secretsDirPath := path.Join(filepath, "lodestar-secrets")
+		secretsDirPath := filepath.Join(fpath, "lodestar-secrets")
 		if err := os.Mkdir(secretsDirPath, os.ModePerm); err != nil {
 			return err
 		}
 		for _, e := range ww.entries {
 			pubHex := e.PubHexBare()
-			if err := ioutil.WriteFile(path.Join(secretsDirPath, pubHex), []byte(e.passphrase), 0644); err != nil {
+			if err := ioutil.WriteFile(filepath.Join(secretsDirPath, pubHex), []byte(e.passphrase), 0644); err != nil {
 				return err
 			}
 		}
@@ -276,12 +284,12 @@ func (ww *WalletWriter) WriteOutputs(filepath string, prysmPass string) error {
 	if err != nil {
 		return err
 	}
-	if err := ioutil.WriteFile(path.Join(filepath, "pubkeys.json"), pubsData, 0644); err != nil {
+	if err := ioutil.WriteFile(filepath.Join(fpath, "pubkeys.json"), pubsData, 0644); err != nil {
 		return err
 	}
 
 	// For Prysm: write outputs as a wallet and a configuration
-	if err := ww.buildPrysmWallet(path.Join(filepath, "prysm"), prysmPass); err != nil {
+	if err := ww.buildPrysmWallet(filepath.Join(fpath, "prysm"), prysmPass); err != nil {
 		return err
 	}
 	return nil
