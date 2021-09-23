@@ -41,7 +41,7 @@ func validatorKeyName(i uint64) string {
 }
 
 type WalletOutput interface {
-	InsertAccount(priv e2types.PrivateKey) error
+	InsertAccount(priv e2types.PrivateKey, idx uint64) error
 }
 
 // Following EIP 2335
@@ -111,14 +111,21 @@ type WalletWriter struct {
 	entries []*KeyEntry
 }
 
-func (ww *WalletWriter) InsertAccount(priv e2types.PrivateKey) error {
+func NewWalletWriter(entries uint64) *WalletWriter {
+	return &WalletWriter{
+		entries: make([]*KeyEntry, entries),
+	}
+
+}
+
+func (ww *WalletWriter) InsertAccount(priv e2types.PrivateKey, idx uint64) error {
 	key, err := NewKeyEntry(priv)
 	if err != nil {
 		return err
 	}
 	ww.RWMutex.Lock()
 	defer ww.RWMutex.Unlock()
-	ww.entries = append(ww.entries, key)
+	ww.entries[idx] = key
 	return nil
 }
 
@@ -365,7 +372,8 @@ func keystoresCommand() *cobra.Command {
 
 			walletProv := wallet.(types.WalletAccountByNameProvider)
 
-			ww := &WalletWriter{}
+			//ww := &WalletWriter{}
+			ww := NewWalletWriter(accountMax - accountMin)
 			checkErr(selectVals(context.Background(), walletProv, accountMin, accountMax, ww), "failed to assign validators")
 			checkErr(ww.WriteOutputs(outputDataPath, prysmPass), "failed to write output")
 		},
@@ -416,7 +424,7 @@ func selectVals(ctx context.Context,
 			if err != nil {
 				return fmt.Errorf("cannot read priv key for account %s with pubkey %s: %v", a.ID().String(), pubkey, err)
 			}
-			if err := output.InsertAccount(priv); err != nil {
+			if err := output.InsertAccount(priv, idx); err != nil {
 				if err.Error() == fmt.Sprintf("account with name \"%s\" already exists", pubkey) {
 					fmt.Printf("Account with pubkey %s already exists in output wallet, skipping it\n", pubkey)
 				} else {
