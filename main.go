@@ -13,6 +13,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/google/uuid"
 	hbls "github.com/herumi/bls-eth-go-binary/bls"
@@ -27,6 +28,7 @@ import (
 	hd "github.com/wealdtech/go-eth2-wallet-hd/v2"
 	scratch "github.com/wealdtech/go-eth2-wallet-store-scratch"
 	types "github.com/wealdtech/go-eth2-wallet-types/v2"
+	"golang.org/x/sync/errgroup"
 )
 
 func init() {
@@ -105,6 +107,7 @@ func (ke *KeyEntry) PubHexBare() string {
 }
 
 type WalletWriter struct {
+	sync.RWMutex
 	entries []*KeyEntry
 }
 
@@ -113,6 +116,8 @@ func (ww *WalletWriter) InsertAccount(priv e2types.PrivateKey) error {
 	if err != nil {
 		return err
 	}
+	ww.RWMutex.Lock()
+	defer ww.RWMutex.Unlock()
 	ww.entries = append(ww.entries, key)
 	return nil
 }
@@ -200,38 +205,45 @@ func (ww *WalletWriter) WriteOutputs(fpath string, prysmPass string) error {
 	if err := os.Mkdir(tekuKeyfilesPath, os.ModePerm); err != nil {
 		return err
 	}
+
+	var g errgroup.Group
 	// For all: write JSON keystore files, each in their own directory (lighthouse requirement)
-	for _, e := range ww.entries {
-		dat, err := e.MarshalJSON()
-		if err != nil {
-			return err
-		}
-		{
-			// lighthouse
-			keyDirPath := filepath.Join(lighthouseKeyfilesPath, e.PubHex())
-			if err := os.MkdirAll(keyDirPath, os.ModePerm); err != nil {
+	for _, k := range ww.entries {
+		e := k
+		g.Go(func() error {
+			dat, err := e.MarshalJSON()
+			if err != nil {
 				return err
 			}
-			if err := ioutil.WriteFile(filepath.Join(keyDirPath, lighthouseKeyfileName), dat, 0644); err != nil {
-				return err
+			{
+				// lighthouse
+				keyDirPath := filepath.Join(lighthouseKeyfilesPath, e.PubHex())
+				if err := os.MkdirAll(keyDirPath, os.ModePerm); err != nil {
+					return err
+				}
+				if err := ioutil.WriteFile(filepath.Join(keyDirPath, lighthouseKeyfileName), dat, 0644); err != nil {
+					return err
+				}
 			}
-		}
-		{
-			// nimbus
-			keyDirPath := filepath.Join(nimbusKeyfilesPath, e.PubHex())
-			if err := os.MkdirAll(keyDirPath, os.ModePerm); err != nil {
-				return err
+			{
+				// nimbus
+				keyDirPath := filepath.Join(nimbusKeyfilesPath, e.PubHex())
+				if err := os.MkdirAll(keyDirPath, os.ModePerm); err != nil {
+					return err
+				}
+				if err := ioutil.WriteFile(filepath.Join(keyDirPath, nimbusKeyfileName), dat, 0644); err != nil {
+					return err
+				}
 			}
-			if err := ioutil.WriteFile(filepath.Join(keyDirPath, nimbusKeyfileName), dat, 0644); err != nil {
-				return err
+			{
+				// teku
+				if err := ioutil.WriteFile(filepath.Join(tekuKeyfilesPath, e.PubHex()+".json"), dat, 0644); err != nil {
+					return err
+				}
 			}
-		}
-		{
-			// teku
-			if err := ioutil.WriteFile(filepath.Join(tekuKeyfilesPath, e.PubHex()+".json"), dat, 0644); err != nil {
-				return err
-			}
-		}
+			return nil
+		})
+
 	}
 	{
 		// For Lighthouse: they need a directory that maps pubkey to passwords, one per file
@@ -239,11 +251,12 @@ func (ww *WalletWriter) WriteOutputs(fpath string, prysmPass string) error {
 		if err := os.Mkdir(secretsDirPath, os.ModePerm); err != nil {
 			return err
 		}
-		for _, e := range ww.entries {
-			pubHex := e.PubHex()
-			if err := ioutil.WriteFile(path.Join(secretsDirPath, pubHex), []byte(e.passphrase), 0644); err != nil {
-				return err
-			}
+		for _, k := range ww.entries {
+			e := k
+			g.Go(func() error {
+				pubHex := e.PubHex()
+				return ioutil.WriteFile(path.Join(secretsDirPath, pubHex), []byte(e.passphrase), 0644)
+			})
 		}
 	}
 
@@ -253,11 +266,13 @@ func (ww *WalletWriter) WriteOutputs(fpath string, prysmPass string) error {
 		if err := os.Mkdir(secretsDirPath, os.ModePerm); err != nil {
 			return err
 		}
-		for _, e := range ww.entries {
-			pubHex := e.PubHex()
-			if err := ioutil.WriteFile(filepath.Join(secretsDirPath, pubHex+".txt"), []byte(e.passphrase), 0644); err != nil {
-				return err
-			}
+		for _, k := range ww.entries {
+			e := k
+			g.Go(func() error {
+				pubHex := e.PubHex()
+				return ioutil.WriteFile(filepath.Join(secretsDirPath, pubHex+".txt"), []byte(e.passphrase), 0644)
+			})
+
 		}
 	}
 
@@ -267,11 +282,13 @@ func (ww *WalletWriter) WriteOutputs(fpath string, prysmPass string) error {
 		if err := os.Mkdir(secretsDirPath, os.ModePerm); err != nil {
 			return err
 		}
-		for _, e := range ww.entries {
-			pubHex := e.PubHexBare()
-			if err := ioutil.WriteFile(filepath.Join(secretsDirPath, pubHex), []byte(e.passphrase), 0644); err != nil {
-				return err
-			}
+		for _, k := range ww.entries {
+			e := k
+			g.Go(func() error {
+				pubHex := e.PubHexBare()
+				return ioutil.WriteFile(filepath.Join(secretsDirPath, pubHex), []byte(e.passphrase), 0644)
+			})
+
 		}
 	}
 
@@ -292,7 +309,7 @@ func (ww *WalletWriter) WriteOutputs(fpath string, prysmPass string) error {
 	if err := ww.buildPrysmWallet(filepath.Join(fpath, "prysm"), prysmPass); err != nil {
 		return err
 	}
-	return nil
+	return g.Wait()
 }
 
 func makeCheckErr(cmd *cobra.Command) func(err error, msg string) {
@@ -375,37 +392,42 @@ func selectVals(ctx context.Context,
 	minAcc uint64, maxAcc uint64,
 	output WalletOutput) error {
 
+	var g errgroup.Group
 	// Try look for unassigned accounts in the wallet
 	for i := minAcc; i < maxAcc; i++ {
-		name := validatorKeyName(i)
-		a, err := wallet.AccountByName(ctx, name)
-		if err != nil {
-			fmt.Printf("Account %s cannot be opened, continuing to next account.\n", name)
-			continue
-		}
-		pubkey := narrowedPubkey(hex.EncodeToString(a.PublicKey().Marshal()))
-		if aLocked, ok := a.(types.AccountLocker); ok {
-			if err := aLocked.Unlock(ctx, []byte{}); err != nil {
-				return fmt.Errorf("failed to unlock priv key for account %s with pubkey %s: %v", a.ID().String(), pubkey, err)
+		idx := i
+		g.Go(func() error {
+			name := validatorKeyName(idx)
+			a, err := wallet.AccountByName(ctx, name)
+			if err != nil {
+				return fmt.Errorf("account %s cannot be opened", name)
 			}
-		}
-		aPriv, ok := a.(types.AccountPrivateKeyProvider)
-		if !ok {
-			return fmt.Errorf("cannot get priv key for account %s with pubkey %s", a.ID().String(), pubkey)
-		}
-		priv, err := aPriv.PrivateKey(ctx)
-		if err != nil {
-			return fmt.Errorf("cannot read priv key for account %s with pubkey %s: %v", a.ID().String(), pubkey, err)
-		}
-		if err := output.InsertAccount(priv); err != nil {
-			if err.Error() == fmt.Sprintf("account with name \"%s\" already exists", pubkey) {
-				fmt.Printf("Account with pubkey %s already exists in output wallet, skipping it\n", pubkey)
-			} else {
-				return fmt.Errorf("failed to import account %s with pubkey %s into output wallet: %v", a.ID().String(), pubkey, err)
+			pubkey := narrowedPubkey(hex.EncodeToString(a.PublicKey().Marshal()))
+			if aLocked, ok := a.(types.AccountLocker); ok {
+				if err := aLocked.Unlock(ctx, []byte{}); err != nil {
+					return fmt.Errorf("failed to unlock priv key for account %s with pubkey %s: %v", a.ID().String(), pubkey, err)
+				}
 			}
-		}
+			aPriv, ok := a.(types.AccountPrivateKeyProvider)
+			if !ok {
+				return fmt.Errorf("cannot get priv key for account %s with pubkey %s", a.ID().String(), pubkey)
+			}
+			priv, err := aPriv.PrivateKey(ctx)
+			if err != nil {
+				return fmt.Errorf("cannot read priv key for account %s with pubkey %s: %v", a.ID().String(), pubkey, err)
+			}
+			if err := output.InsertAccount(priv); err != nil {
+				if err.Error() == fmt.Sprintf("account with name \"%s\" already exists", pubkey) {
+					fmt.Printf("Account with pubkey %s already exists in output wallet, skipping it\n", pubkey)
+				} else {
+					return fmt.Errorf("failed to import account %s with pubkey %s into output wallet: %v", a.ID().String(), pubkey, err)
+				}
+			}
+			return nil
+		})
+
 	}
-	return nil
+	return g.Wait()
 }
 
 func createMnemonicCmd() *cobra.Command {
