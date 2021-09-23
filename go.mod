@@ -19,6 +19,7 @@ require (
 	github.com/wealdtech/go-eth2-wallet-store-scratch v1.6.2
 	github.com/wealdtech/go-eth2-wallet-types/v2 v2.8.3
 	golang.org/x/crypto v0.0.0-20210220033148-5ea612d1eb83 // indirect
+	golang.org/x/sync v0.0.0-20190423024810-112230192c58
 	golang.org/x/sys v0.0.0-20210228012217-479acdf4ea46 // indirect
 	gopkg.in/check.v1 v1.0.0-20200227125254-8fa46927fb4f // indirect
 )
