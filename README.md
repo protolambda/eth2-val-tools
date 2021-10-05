@@ -38,11 +38,14 @@ Usage:
   eth2-val-tools keystores [flags]
 
 Flags:
+  -h, --help                     help for keystores
+      --insecure                 Enable to output insecure keystores (faster generation, ONLY for ephemeral private testnets
       --out-loc string           Path of the output data for the host, where wallets, keys, secrets dir, etc. are written (default "assigned_data")
       --prysm-pass string        Password for all-accounts keystore file (Prysm only)
       --source-max uint          Maximum validator index in HD path range (excl.)
       --source-min uint          Minimum validator index in HD path range (incl.)
       --source-mnemonic string   The validators mnemonic to source account keys from.
+
 ```
 
 ### `mnemonic`
