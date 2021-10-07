@@ -7,7 +7,7 @@ require (
 	github.com/herumi/bls-eth-go-binary v0.0.0-20210226112520-435ed8c04ddd
 	github.com/minio/sha256-simd v1.0.0 // indirect
 	github.com/niemeyer/pretty v0.0.0-20200227124842-a10e7caefd8e // indirect
-	github.com/protolambda/go-keystorev4 v0.0.0-20210914214957-cf12d9c28a52
+	github.com/protolambda/go-keystorev4 v0.0.0-20211007151826-f20444f6d564
 	github.com/protolambda/zrnt v0.14.0
 	github.com/protolambda/ztyp v0.1.2
 	github.com/spf13/cobra v1.1.3

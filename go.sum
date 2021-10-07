@@ -160,6 +160,8 @@ github.com/prometheus/procfs v0.0.0-20190507164030-5867b95ac084/go.mod h1:TjEm7z
 github.com/prometheus/tsdb v0.7.1/go.mod h1:qhTCs0VvXwvX/y3TZrWD7rabWM+ijKTux40TwIPHuXU=
 github.com/protolambda/go-keystorev4 v0.0.0-20210914214957-cf12d9c28a52 h1:5znmcOBjXNx2ox6KXpBRAoIuDOCw7ZV+2Xb6yZ7M0K0=
 github.com/protolambda/go-keystorev4 v0.0.0-20210914214957-cf12d9c28a52/go.mod h1:Xda3KO8+DMyWaTr+LwUUpVRTB5SdFzoKu0ivXNI6p1s=
+github.com/protolambda/go-keystorev4 v0.0.0-20211007151826-f20444f6d564 h1:yCXGkFjrZ8EggxW+Y7ueRZesNcBk0avLU0mVU/I2KtU=
+github.com/protolambda/go-keystorev4 v0.0.0-20211007151826-f20444f6d564/go.mod h1:Xda3KO8+DMyWaTr+LwUUpVRTB5SdFzoKu0ivXNI6p1s=
 github.com/protolambda/messagediff v1.4.0/go.mod h1:LboJp0EwIbJsePYpzh5Op/9G1/4mIztMRYzzwR0dR2M=
 github.com/protolambda/zrnt v0.14.0 h1:TIoHibrIZ6rOjV2NMnTdm9wBcaLYs+xdAeWWWwfuV9c=
 github.com/protolambda/zrnt v0.14.0/go.mod h1:rJSDrwIyY6L5L3GvOivJDgJDqvIfpNWIIWB0C3v3SVY=
