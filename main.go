@@ -97,7 +97,7 @@ func (ke *KeyEntry) MarshalJSON() ([]byte, error) {
 	}
 	keystore := &keystorev4.Keystore{
 		Crypto:      *crypto,
-		Description: "",
+		Description: fmt.Sprintf("0x%x", ke.publicKey.Marshal()),
 		Pubkey:      ke.publicKey.Marshal(),
 		Path:        "",
 		UUID:        ke.id,
