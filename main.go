@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
@@ -17,6 +16,7 @@ import (
 
 	"github.com/google/uuid"
 	hbls "github.com/herumi/bls-eth-go-binary/bls"
+	"github.com/protolambda/go-keystorev4"
 	"github.com/protolambda/zrnt/eth2/beacon"
 	"github.com/protolambda/zrnt/eth2/configs"
 	"github.com/protolambda/zrnt/eth2/util/hashing"
@@ -24,10 +24,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/tyler-smith/go-bip39"
 	e2types "github.com/wealdtech/go-eth2-types/v2"
-	keystorev4 "github.com/wealdtech/go-eth2-wallet-encryptor-keystorev4"
-	hd "github.com/wealdtech/go-eth2-wallet-hd/v2"
-	scratch "github.com/wealdtech/go-eth2-wallet-store-scratch"
-	types "github.com/wealdtech/go-eth2-wallet-types/v2"
+	util "github.com/wealdtech/go-eth2-util"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -36,12 +33,8 @@ func init() {
 	hbls.SetETHmode(hbls.EthModeLatest)
 }
 
-func validatorKeyName(i uint64) string {
-	return fmt.Sprintf("m/12381/3600/%d/0/0", i)
-}
-
 type WalletOutput interface {
-	InsertAccount(priv e2types.PrivateKey, idx uint64) error
+	InsertAccount(priv e2types.PrivateKey, insecure bool, idx uint64) error
 }
 
 // Following EIP 2335
@@ -55,9 +48,10 @@ type KeyFile struct {
 type KeyEntry struct {
 	KeyFile
 	passphrase string
+	insecure   bool
 }
 
-func NewKeyEntry(priv e2types.PrivateKey) (*KeyEntry, error) {
+func NewKeyEntry(priv e2types.PrivateKey, insecure bool) (*KeyEntry, error) {
 	var pass [32]byte
 	n, err := rand.Read(pass[:])
 	if err != nil {
@@ -76,26 +70,42 @@ func NewKeyEntry(priv e2types.PrivateKey) (*KeyEntry, error) {
 			secretKey: priv,
 		},
 		passphrase: passphrase,
+		insecure:   insecure,
 	}, nil
 }
 
 func (ke *KeyEntry) MarshalJSON() ([]byte, error) {
-	data := make(map[string]interface{})
-	// TODO: ligthouse can't handle this field, should it be here?
-	//data["name"] = ke.name
-	encryptor := keystorev4.New(keystorev4.WithCipher("pbkdf2"))
-	var err error
-	data["crypto"], err = encryptor.Encrypt(ke.secretKey.Marshal(), ke.passphrase)
-	if err != nil {
+	var salt [32]byte
+	if _, err := rand.Read(salt[:]); err != nil {
 		return nil, err
 	}
-	// Empty, on distributed wallets we do not need it.
-	// Teku does not put anything here, and lighthouse has passing tests with empty value here.
-	data["path"] = ""
-	data["uuid"] = ke.id.String()
-	data["version"] = 4
-	data["pubkey"] = fmt.Sprintf("%x", ke.publicKey.Marshal())
-	return json.Marshal(data)
+	kdfParams := &keystorev4.PBKDF2Params{
+		Dklen: 32,
+		C:     262144,
+		Prf:   "hmac-sha256",
+		Salt:  salt[:],
+	}
+	if ke.insecure { // INSECURE but much faster, this is useful for ephemeral testnets
+		kdfParams.C = 2
+	}
+	cipherParams, err := keystorev4.NewAES128CTRParams()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create AES128CTR params: %w", err)
+	}
+	crypto, err := keystorev4.Encrypt(ke.secretKey.Marshal(), []byte(ke.passphrase),
+		kdfParams, keystorev4.Sha256ChecksumParams, cipherParams)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encrypt secret: %w", err)
+	}
+	keystore := &keystorev4.Keystore{
+		Crypto:      *crypto,
+		Description: fmt.Sprintf("0x%x", ke.publicKey.Marshal()),
+		Pubkey:      ke.publicKey.Marshal(),
+		Path:        "",
+		UUID:        ke.id,
+		Version:     4,
+	}
+	return json.Marshal(keystore)
 }
 
 func (ke *KeyEntry) PubHex() string {
@@ -118,8 +128,8 @@ func NewWalletWriter(entries uint64) *WalletWriter {
 
 }
 
-func (ww *WalletWriter) InsertAccount(priv e2types.PrivateKey, idx uint64) error {
-	key, err := NewKeyEntry(priv)
+func (ww *WalletWriter) InsertAccount(priv e2types.PrivateKey, insecure bool, idx uint64) error {
+	key, err := NewKeyEntry(priv, insecure)
 	if err != nil {
 		return err
 	}
@@ -161,20 +171,33 @@ func (ww *WalletWriter) buildPrysmWallet(outPath string, prysmPass string) error
 	if err != nil {
 		return err
 	}
-	encryptor := keystorev4.New()
+
+	kdfParams, err := keystorev4.NewPBKDF2Params()
+	if err != nil {
+		return fmt.Errorf("failed to create PBKDF2 params: %w", err)
+	}
+	cipherParams, err := keystorev4.NewAES128CTRParams()
+	if err != nil {
+		return fmt.Errorf("failed to create AES128CTR params: %w", err)
+	}
+	crypto, err := keystorev4.Encrypt(storeBytes, []byte(prysmPass),
+		kdfParams, keystorev4.Sha256ChecksumParams, cipherParams)
+	if err != nil {
+		return fmt.Errorf("failed to encrypt secret: %w", err)
+	}
 	id, err := uuid.NewRandom()
 	if err != nil {
 		return err
 	}
-	cryptoFields, err := encryptor.Encrypt(storeBytes, prysmPass)
-	if err != nil {
-		return err
+	keystore := &keystorev4.Keystore{
+		Crypto:      *crypto,
+		Description: "",
+		Pubkey:      nil,
+		Path:        "",
+		UUID:        id,
+		Version:     4,
 	}
-	data := make(map[string]interface{})
-	data["uuid"] = id.String()
-	data["version"] = 4
-	data["crypto"] = cryptoFields
-	encodedStore, err := json.MarshalIndent(data, "", "\t")
+	encodedStore, err := json.MarshalIndent(keystore, "", "\t")
 	if err != nil {
 		return err
 	}
@@ -331,25 +354,6 @@ func makeCheckErr(cmd *cobra.Command) func(err error, msg string) {
 	}
 }
 
-func walletFromMnemonic(mnemonic string) (types.Wallet, error) {
-	store := scratch.New()
-	encryptor := keystorev4.New()
-	mnemonic = strings.TrimSpace(mnemonic)
-	if !bip39.IsMnemonicValid(mnemonic) {
-		return nil, errors.New("mnemonic is not valid")
-	}
-	seed := bip39.NewSeed(mnemonic, "")
-	wallet, err := hd.CreateWallet(context.Background(), "imported wallet", []byte{}, store, encryptor, seed)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create scratch wallet from seed: %v", err)
-	}
-	err = wallet.(types.WalletLocker).Unlock(context.Background(), []byte{})
-	if err != nil {
-		return nil, fmt.Errorf("failed to unlock scratch wallet: %v", err)
-	}
-	return wallet, nil
-}
-
 func keystoresCommand() *cobra.Command {
 
 	var prysmPass string
@@ -361,20 +365,17 @@ func keystoresCommand() *cobra.Command {
 	var accountMin uint64
 	var accountMax uint64
 
+	var insecure bool
+
 	cmd := &cobra.Command{
 		Use:   "keystores",
 		Short: "Build range of keystores for any target format",
 		Args:  cobra.NoArgs,
 		Run: func(cmd *cobra.Command, args []string) {
 			checkErr := makeCheckErr(cmd)
-			wallet, err := walletFromMnemonic(sourceMnemonic)
-			checkErr(err, "could not create scratch wallet from mnemonic")
 
-			walletProv := wallet.(types.WalletAccountByNameProvider)
-
-			//ww := &WalletWriter{}
 			ww := NewWalletWriter(accountMax - accountMin)
-			checkErr(selectVals(context.Background(), walletProv, accountMin, accountMax, ww), "failed to assign validators")
+			checkErr(selectVals(sourceMnemonic, accountMin, accountMax, ww, insecure), "failed to assign validators")
 			checkErr(ww.WriteOutputs(outputDataPath, prysmPass), "failed to write output")
 		},
 	}
@@ -386,6 +387,7 @@ func keystoresCommand() *cobra.Command {
 
 	cmd.Flags().Uint64Var(&accountMin, "source-min", 0, "Minimum validator index in HD path range (incl.)")
 	cmd.Flags().Uint64Var(&accountMax, "source-max", 0, "Maximum validator index in HD path range (excl.)")
+	cmd.Flags().BoolVar(&insecure, "insecure", false, "Enable to output insecure keystores (faster generation, ONLY for ephemeral private testnets")
 
 	return cmd
 }
@@ -395,42 +397,34 @@ func narrowedPubkey(pub string) string {
 	return strings.TrimPrefix(strings.ToLower(pub), "0x")
 }
 
-func selectVals(ctx context.Context,
-	wallet types.WalletAccountByNameProvider,
+func selectVals(sourceMnemonic string,
 	minAcc uint64, maxAcc uint64,
-	output WalletOutput) error {
+	output WalletOutput, insecure bool) error {
+
+	valSeed, err := mnemonicToSeed(sourceMnemonic)
+	if err != nil {
+		return err
+	}
 
 	var g errgroup.Group
 	// Try look for unassigned accounts in the wallet
 	for i := minAcc; i < maxAcc; i++ {
 		idx := i
 		g.Go(func() error {
-			name := validatorKeyName(idx)
-			a, err := wallet.AccountByName(ctx, name)
+			valAccPath := fmt.Sprintf("m/12381/3600/%d/0/0", idx)
+			a, err := util.PrivateKeyFromSeedAndPath(valSeed, valAccPath)
 			if err != nil {
-				return fmt.Errorf("account %s cannot be opened", name)
+				return fmt.Errorf("account %s cannot be derived, continuing to next account", valAccPath)
 			}
 			pubkey := narrowedPubkey(hex.EncodeToString(a.PublicKey().Marshal()))
-			if aLocked, ok := a.(types.AccountLocker); ok {
-				if err := aLocked.Unlock(ctx, []byte{}); err != nil {
-					return fmt.Errorf("failed to unlock priv key for account %s with pubkey %s: %v", a.ID().String(), pubkey, err)
-				}
-			}
-			aPriv, ok := a.(types.AccountPrivateKeyProvider)
-			if !ok {
-				return fmt.Errorf("cannot get priv key for account %s with pubkey %s", a.ID().String(), pubkey)
-			}
-			priv, err := aPriv.PrivateKey(ctx)
-			if err != nil {
-				return fmt.Errorf("cannot read priv key for account %s with pubkey %s: %v", a.ID().String(), pubkey, err)
-			}
-			if err := output.InsertAccount(priv, idx); err != nil {
+			if err := output.InsertAccount(a, insecure, idx); err != nil {
 				if err.Error() == fmt.Sprintf("account with name \"%s\" already exists", pubkey) {
 					fmt.Printf("Account with pubkey %s already exists in output wallet, skipping it\n", pubkey)
 				} else {
-					return fmt.Errorf("failed to import account %s with pubkey %s into output wallet: %v", a.ID().String(), pubkey, err)
+					return fmt.Errorf("failed to import account with pubkey %s into output wallet: %v", pubkey, err)
 				}
 			}
+
 			return nil
 		})
 
@@ -455,6 +449,14 @@ func createMnemonicCmd() *cobra.Command {
 	return cmd
 }
 
+func mnemonicToSeed(mnemonic string) (seed []byte, err error) {
+	mnemonic = strings.TrimSpace(mnemonic)
+	if !bip39.IsMnemonicValid(mnemonic) {
+		return nil, errors.New("mnemonic is not valid")
+	}
+	return bip39.NewSeed(mnemonic, ""), nil
+}
+
 func createDepositDatasCmd() *cobra.Command {
 	var accountMin uint64
 	var accountMax uint64
@@ -476,26 +478,25 @@ func createDepositDatasCmd() *cobra.Command {
 			checkErr := makeCheckErr(cmd)
 			var genesisForkVersion beacon.Version
 			checkErr(genesisForkVersion.UnmarshalText([]byte(forkVersion)), "cannot decode fork version")
-			validators, err := walletFromMnemonic(validatorsMnemonic)
-			checkErr(err, "failed to load validators mnemonic")
-			valAccs := validators.(types.WalletAccountByNameProvider)
-			withdrawals, err := walletFromMnemonic(withdrawalsMnemonic)
-			checkErr(err, "failed to load validators mnemonic")
-			withdrawlAccs := withdrawals.(types.WalletAccountByNameProvider)
-			ctx := context.Background()
+
+			valSeed, err := mnemonicToSeed(validatorsMnemonic)
+			checkErr(err, "bad validator mnemonic")
+			withdrSeed, err := mnemonicToSeed(withdrawalsMnemonic)
+			checkErr(err, "bad withdrawal mnemonic")
+
 			if asJsonList {
 				cmd.Println("[")
 			}
 			for i := accountMin; i < accountMax; i++ {
-				accPath := validatorKeyName(i)
-				val, err := valAccs.AccountByName(ctx, accPath)
-				checkErr(err, fmt.Sprintf("could not get validator key %d", i))
+				valAccPath := fmt.Sprintf("m/12381/3600/%d/0/0", i)
+				val, err := util.PrivateKeyFromSeedAndPath(valSeed, valAccPath)
+				checkErr(err, fmt.Sprintf("failed to create validator private key for path %q", valAccPath))
+				withdrAccPath := fmt.Sprintf("m/12381/3600/%d/0", i)
+				withdr, err := util.PrivateKeyFromSeedAndPath(withdrSeed, withdrAccPath)
+				checkErr(err, fmt.Sprintf("failed to create withdrawal private key for path %q", withdrAccPath))
 
 				var pub beacon.BLSPubkey
 				copy(pub[:], val.PublicKey().Marshal())
-
-				withdr, err := withdrawlAccs.AccountByName(ctx, accPath)
-				checkErr(err, fmt.Sprintf("could not get withdrawl key %d", i))
 
 				var withdrPub beacon.BLSPubkey
 				copy(withdrPub[:], withdr.PublicKey().Marshal())
@@ -509,10 +510,9 @@ func createDepositDatasCmd() *cobra.Command {
 					Signature:             beacon.BLSSignature{},
 				}
 				msgRoot := data.ToMessage().HashTreeRoot(tree.GetHashFn())
-				valPriv, err := val.(types.AccountPrivateKeyProvider).PrivateKey(ctx)
 				checkErr(err, "cannot get validator private key")
 				var secKey hbls.SecretKey
-				checkErr(secKey.Deserialize(valPriv.Marshal()), "cannot convert validator priv key")
+				checkErr(secKey.Deserialize(val.Marshal()), "cannot convert validator priv key")
 
 				dom := beacon.ComputeDomain(configs.Mainnet.DOMAIN_DEPOSIT, genesisForkVersion, beacon.Root{})
 				msg := beacon.ComputeSigningRoot(msgRoot, dom)
@@ -521,7 +521,7 @@ func createDepositDatasCmd() *cobra.Command {
 
 				dataRoot := data.HashTreeRoot(tree.GetHashFn())
 				jsonData := map[string]interface{}{
-					"account":                accPath, // for ease with tracking where it came from.
+					"account":                valAccPath, // for ease with tracking where it came from.
 					"pubkey":                 hex.EncodeToString(data.Pubkey[:]),
 					"withdrawal_credentials": hex.EncodeToString(data.WithdrawalCredentials[:]),
 					"signature":              hex.EncodeToString(data.Signature[:]),
@@ -565,17 +565,18 @@ func createPubkeysCmd() *cobra.Command {
 		Args:  cobra.NoArgs,
 		Run: func(cmd *cobra.Command, args []string) {
 			checkErr := makeCheckErr(cmd)
-			validators, err := walletFromMnemonic(validatorsMnemonic)
-			checkErr(err, "failed to load validators mnemonic")
-			valAccs := validators.(types.WalletAccountByNameProvider)
-			ctx := context.Background()
+
+			valSeed, err := mnemonicToSeed(validatorsMnemonic)
+			checkErr(err, "bad validator mnemonic")
+
 			for i := accountMin; i < accountMax; i++ {
-				accPath := validatorKeyName(i)
-				val, err := valAccs.AccountByName(ctx, accPath)
-				checkErr(err, fmt.Sprintf("could not get validator key %d", i))
+
+				path := fmt.Sprintf("m/12381/3600/%d/0/0", i)
+				valPrivateKey, err := util.PrivateKeyFromSeedAndPath(valSeed, path)
+				checkErr(err, fmt.Sprintf("failed to create validator private key for path %q", path))
 
 				var pub beacon.BLSPubkey
-				copy(pub[:], val.PublicKey().Marshal())
+				copy(pub[:], valPrivateKey.PublicKey().Marshal())
 				cmd.Println(pub.String())
 			}
 		},
