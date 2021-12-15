@@ -417,7 +417,7 @@ func selectVals(sourceMnemonic string,
 				return fmt.Errorf("account %s cannot be derived, continuing to next account", valAccPath)
 			}
 			pubkey := narrowedPubkey(hex.EncodeToString(a.PublicKey().Marshal()))
-			if err := output.InsertAccount(a, insecure, idx); err != nil {
+			if err := output.InsertAccount(a, insecure, idx-minAcc); err != nil {
 				if err.Error() == fmt.Sprintf("account with name \"%s\" already exists", pubkey) {
 					fmt.Printf("Account with pubkey %s already exists in output wallet, skipping it\n", pubkey)
 				} else {
