@@ -316,7 +316,7 @@ func (ww *WalletWriter) WriteOutputs(fpath string, prysmPass string) error {
 			e := k
 			g.Go(func() error {
 				pubHex := e.PubHexBare()
-				return ioutil.WriteFile(filepath.Join(secretsDirPath, pubHex), []byte(e.passphrase), 0644)
+				return ioutil.WriteFile(filepath.Join(secretsDirPath, "0x" + pubHex), []byte(e.passphrase), 0644)
 			})
 
 		}
