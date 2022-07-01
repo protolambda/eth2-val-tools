@@ -1,4 +1,4 @@
-module github.com/z3n-chada/eth2-val-tools
+module github.com/protolambda/eth2-val-tools
 
 go 1.14
 
