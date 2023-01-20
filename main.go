@@ -17,7 +17,7 @@ import (
 	"github.com/google/uuid"
 	hbls "github.com/herumi/bls-eth-go-binary/bls"
 	"github.com/protolambda/go-keystorev4"
-	"github.com/protolambda/zrnt/eth2/beacon"
+	"github.com/protolambda/zrnt/eth2/beacon/common"
 	"github.com/protolambda/zrnt/eth2/configs"
 	"github.com/protolambda/zrnt/eth2/util/hashing"
 	"github.com/protolambda/ztyp/tree"
@@ -316,7 +316,7 @@ func (ww *WalletWriter) WriteOutputs(fpath string, prysmPass string) error {
 			e := k
 			g.Go(func() error {
 				pubHex := e.PubHexBare()
-				return ioutil.WriteFile(filepath.Join(secretsDirPath, "0x" + pubHex), []byte(e.passphrase), 0644)
+				return ioutil.WriteFile(filepath.Join(secretsDirPath, "0x"+pubHex), []byte(e.passphrase), 0644)
 			})
 
 		}
@@ -457,6 +457,90 @@ func mnemonicToSeed(mnemonic string) (seed []byte, err error) {
 	return bip39.NewSeed(mnemonic, ""), nil
 }
 
+func createAddressChangesCmd() *cobra.Command {
+	var accountMin uint64
+	var accountMax uint64
+
+	var forkVersion string
+
+	var executionAddr string
+	var genesisValidatorsRootStr string
+
+	var withdrawalsMnemonic string
+
+	var asJsonList bool
+
+	cmd := &cobra.Command{
+		Use:   "bls-address-change",
+		Short: "Create signed BLS to execution address change messages for the given range of validators. 1 json-encoded message per line.",
+		Args:  cobra.NoArgs,
+		Run: func(cmd *cobra.Command, args []string) {
+			checkErr := makeCheckErr(cmd)
+			var genesisForkVersion common.Version
+			checkErr(genesisForkVersion.UnmarshalText([]byte(forkVersion)), "cannot decode fork version")
+
+			var execAddr common.Eth1Address
+			checkErr(execAddr.UnmarshalText([]byte(executionAddr)), "cannot decode execution addr")
+
+			var genesisValidatorsRoot common.Root
+			checkErr(genesisValidatorsRoot.UnmarshalText([]byte(genesisValidatorsRootStr)), "cannot decode genesis validators root")
+
+			withdrSeed, err := mnemonicToSeed(withdrawalsMnemonic)
+			checkErr(err, "bad withdrawal mnemonic")
+
+			if asJsonList {
+				cmd.Println("[")
+			}
+			for i := accountMin; i < accountMax; i++ {
+				withdrAccPath := fmt.Sprintf("m/12381/3600/%d/0", i)
+				withdr, err := util.PrivateKeyFromSeedAndPath(withdrSeed, withdrAccPath)
+				checkErr(err, fmt.Sprintf("failed to create withdrawal private key for path %q", withdrAccPath))
+
+				var withdrPub common.BLSPubkey
+				copy(withdrPub[:], withdr.PublicKey().Marshal())
+				withdrCreds := hashing.Hash(withdrPub[:])
+				withdrCreds[0] = common.BLS_WITHDRAWAL_PREFIX
+
+				msg := common.BLSToExecutionChange{
+					ValidatorIndex:     common.ValidatorIndex(i),
+					FromBLSPubKey:      withdrPub,
+					ToExecutionAddress: execAddr,
+				}
+				var secKey hbls.SecretKey
+				checkErr(secKey.Deserialize(withdr.Marshal()), "cannot convert validator priv key")
+
+				msgRoot := msg.HashTreeRoot(tree.GetHashFn())
+				dom := common.ComputeDomain(common.DOMAIN_BLS_TO_EXECUTION_CHANGE, genesisForkVersion, genesisValidatorsRoot)
+				signingRoot := common.ComputeSigningRoot(msgRoot, dom)
+				sig := secKey.SignHash(signingRoot[:])
+				var signedMsg common.SignedBLSToExecutionChange
+				signedMsg.BLSToExecutionChange = msg
+				copy(signedMsg.Signature[:], sig.Serialize())
+
+				jsonStr, err := json.Marshal(&signedMsg)
+				if asJsonList && i+1 < accountMax {
+					jsonStr = append(jsonStr, ',')
+				}
+				checkErr(err, "could not encode deposit data to json")
+				cmd.Println(string(jsonStr))
+			}
+			if asJsonList {
+				cmd.Println("]")
+			}
+		},
+	}
+
+	cmd.Flags().StringVar(&withdrawalsMnemonic, "withdrawals-mnemonic", "", "Mnemonic to use for BLS withdrawal creds. Withdrawal accounts are assumed to have standard paths relative to validators.")
+	cmd.Flags().Uint64Var(&accountMin, "source-min", 0, "Minimum validator index in HD path range (incl.)")
+	cmd.Flags().Uint64Var(&accountMax, "source-max", 0, "Maximum validator index in HD path range (excl.)")
+	cmd.Flags().StringVar(&genesisValidatorsRootStr, "genesis-validators-root", "", "Genesis validators root. Hex encoded with prefix.")
+	cmd.Flags().StringVar(&executionAddr, "execution-address", "", "Execution address to withdraw to. Hex encoded with prefix.")
+	cmd.Flags().StringVar(&forkVersion, "fork-version", "", "Genesis fork version, e.g. 0x11223344")
+	cmd.Flags().BoolVar(&asJsonList, "as-json-list", false, "If the json datas should be wrapped with brackets and separated with commas, like a json list.")
+
+	return cmd
+}
+
 func createDepositDatasCmd() *cobra.Command {
 	var accountMin uint64
 	var accountMax uint64
@@ -476,7 +560,7 @@ func createDepositDatasCmd() *cobra.Command {
 		Args:  cobra.NoArgs,
 		Run: func(cmd *cobra.Command, args []string) {
 			checkErr := makeCheckErr(cmd)
-			var genesisForkVersion beacon.Version
+			var genesisForkVersion common.Version
 			checkErr(genesisForkVersion.UnmarshalText([]byte(forkVersion)), "cannot decode fork version")
 
 			valSeed, err := mnemonicToSeed(validatorsMnemonic)
@@ -495,27 +579,26 @@ func createDepositDatasCmd() *cobra.Command {
 				withdr, err := util.PrivateKeyFromSeedAndPath(withdrSeed, withdrAccPath)
 				checkErr(err, fmt.Sprintf("failed to create withdrawal private key for path %q", withdrAccPath))
 
-				var pub beacon.BLSPubkey
+				var pub common.BLSPubkey
 				copy(pub[:], val.PublicKey().Marshal())
 
-				var withdrPub beacon.BLSPubkey
+				var withdrPub common.BLSPubkey
 				copy(withdrPub[:], withdr.PublicKey().Marshal())
 				withdrCreds := hashing.Hash(withdrPub[:])
-				withdrCreds[0] = configs.Mainnet.BLS_WITHDRAWAL_PREFIX[0]
+				withdrCreds[0] = common.BLS_WITHDRAWAL_PREFIX
 
-				data := beacon.DepositData{
+				data := common.DepositData{
 					Pubkey:                pub,
 					WithdrawalCredentials: withdrCreds,
-					Amount:                beacon.Gwei(amountGwei),
-					Signature:             beacon.BLSSignature{},
+					Amount:                common.Gwei(amountGwei),
+					Signature:             common.BLSSignature{},
 				}
 				msgRoot := data.ToMessage().HashTreeRoot(tree.GetHashFn())
-				checkErr(err, "cannot get validator private key")
 				var secKey hbls.SecretKey
 				checkErr(secKey.Deserialize(val.Marshal()), "cannot convert validator priv key")
 
-				dom := beacon.ComputeDomain(configs.Mainnet.DOMAIN_DEPOSIT, genesisForkVersion, beacon.Root{})
-				msg := beacon.ComputeSigningRoot(msgRoot, dom)
+				dom := common.ComputeDomain(common.DOMAIN_DEPOSIT, genesisForkVersion, common.Root{})
+				msg := common.ComputeSigningRoot(msgRoot, dom)
 				sig := secKey.SignHash(msg[:])
 				copy(data.Signature[:], sig.Serialize())
 
@@ -543,7 +626,7 @@ func createDepositDatasCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&validatorsMnemonic, "validators-mnemonic", "", "Mnemonic to use for validators.")
-	cmd.Flags().StringVar(&withdrawalsMnemonic, "withdrawals-mnemonic", "", "Mnemonic to use for withdrawals. Withdrawal accounts are assumed to have matching paths with validators.")
+	cmd.Flags().StringVar(&withdrawalsMnemonic, "withdrawals-mnemonic", "", "Mnemonic to use for BLS withdrawal creds. Withdrawal accounts are assumed to have standard paths relative to validators.")
 	cmd.Flags().Uint64Var(&accountMin, "source-min", 0, "Minimum validator index in HD path range (incl.)")
 	cmd.Flags().Uint64Var(&accountMax, "source-max", 0, "Maximum validator index in HD path range (excl.)")
 	cmd.Flags().Uint64Var(&amountGwei, "amount", uint64(configs.Mainnet.MAX_EFFECTIVE_BALANCE), "Amount to deposit, in Gwei")
@@ -575,7 +658,7 @@ func createPubkeysCmd() *cobra.Command {
 				valPrivateKey, err := util.PrivateKeyFromSeedAndPath(valSeed, path)
 				checkErr(err, fmt.Sprintf("failed to create validator private key for path %q", path))
 
-				var pub beacon.BLSPubkey
+				var pub common.BLSPubkey
 				copy(pub[:], valPrivateKey.PublicKey().Marshal())
 				cmd.Println(pub.String())
 			}
@@ -600,6 +683,7 @@ func main() {
 	rootCmd.AddCommand(createMnemonicCmd())
 	rootCmd.AddCommand(createDepositDatasCmd())
 	rootCmd.AddCommand(createPubkeysCmd())
+	rootCmd.AddCommand(createAddressChangesCmd())
 	rootCmd.SetOut(os.Stdout)
 	rootCmd.SetErr(os.Stderr)
 	if err := rootCmd.Execute(); err != nil {
