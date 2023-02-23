@@ -16,7 +16,7 @@ go install .
 cd ..
 
 # Install ethereal
-GO111MODULE=on go get github.com/wealdtech/ethereal 
+GO111MODULE=on go install github.com/wealdtech/ethereal@latest
 ```
 
 Steps:
