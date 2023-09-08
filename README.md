@@ -122,6 +122,8 @@ The output is:
  Each directory contains a `voting-keystore.json`, an EIP 2335 keystore file, with `path` field set to empty string.
  The `voting-keystore.json` name is a requirement of Lighthouse.
 
+If you use a custom `--datadir` value, a simple way to initialize your keys is to use the [automatic validator discovery](https://lighthouse-book.sigmaprime.io/validator-management.html#automatic-validator-discovery). Simply recursively copy your `secrets` directory into `$DATADIR` and recursively copy every files from the `keys` into `$DATADIR/validators`. Start the Lighthouse validator client with `--datadir $DATADIR`. If you start the validator client for the first time, you will need the `--init-slashing-protection` flag. After a successful validator key discovery and initialization for the first time, you can remove the `--init-slashing-protection` flag.
+
 ### Nimbus
 
 Nimbus, a lot like lighthouse, expects a keys and secrets directory, which can be configured.
