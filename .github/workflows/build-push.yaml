@@ -5,7 +5,6 @@ on:
       - master
     tags:
       - '**'
-    workflow_dispatch:
 
 jobs:
   build-push:
@@ -29,7 +28,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v4
         with:
-          images: bbusa/eth2-val-tools
+          images: protolambda/eth2-val-tools
           flavor: latest=true
           tags: |
             type=ref,event=branch
