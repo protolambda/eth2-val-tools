@@ -2,31 +2,6 @@
 
 __*Warning: Use at your own RISK, this is all very EXPERIMENTAL*__
 
-## Deposits
-
-Optionally install [`ethereal`](https://github.com/wealdtech/ethereal/), to run the `exec_deposits.sh` step. 
-
-Important: when installing, run the commands outside of the root directory of this repository, to not mix up the go modules.
-
-```shell script
-# Install this assignments tool
-go install .
-
-# Move out of this dir
-cd ..
-
-# Install ethereal
-GO111MODULE=on go install github.com/wealdtech/ethereal@latest
-```
-
-Steps:
-- `eth2-val-tools mnemonic`, twice: one for validator keys, one for withdrawal keys. Put them in the config.
-- `. my_config.sh`: central configuration with environment vars, see `example_config.sh` for an example
-- `. build_deposits.sh`: uses the mnemonics to generate deposit data for the configured range of accounts. (overwrites any existing deposit data file)
-- `. exec_deposits.sh`: executes deposit datas, making eth1 transactions
-
-For automatic validator assignment, tracking and deployment, use the `assign` command of the Go module in this repo. 
-
 ## Commands
 
 ### `keystores`
@@ -45,7 +20,6 @@ Flags:
       --source-max uint          Maximum validator index in HD path range (excl.)
       --source-min uint          Minimum validator index in HD path range (incl.)
       --source-mnemonic string   The validators mnemonic to source account keys from.
-
 ```
 
 ### `mnemonic`
@@ -74,17 +48,48 @@ Usage:
 
 Flags:
       --amount uint                   Amount to deposit, in Gwei (default 32000000000)
+      --as-json-list                  If the json datas should be wrapped with brackets and separated with commas, like a json list.
       --fork-version string           Fork version, e.g. 0x11223344
   -h, --help                          help for deposit-data
       --source-max uint               Maximum validator index in HD path range (excl.)
       --source-min uint               Minimum validator index in HD path range (incl.)
       --validators-mnemonic string    Mnemonic to use for validators.
-      --withdrawals-mnemonic string   Mnemonic to use for withdrawals. Withdrawal accounts are assumed to have matching paths with validators.
+      --withdrawals-mnemonic string   Mnemonic to use for BLS withdrawal creds. Withdrawal accounts are assumed to have standard paths relative to validators.
+```
+
+### `bls-address-change`
+
+```
+Create signed BLS to execution address change messages for the given range of validators. 1 json-encoded message per line.
+
+Usage:
+  eth2-val-tools bls-address-change [flags]
+
+Flags:
+      --as-json-list                     If the json datas should be wrapped with brackets and separated with commas, like a json list.
+      --execution-address string         Execution address to withdraw to. Hex encoded with prefix.
+      --fork-version string              Genesis fork version, e.g. 0x11223344
+      --genesis-validators-root string   Genesis validators root. Hex encoded with prefix.
+  -h, --help                             help for bls-address-change
+      --source-max uint                  Maximum validator index in HD path range (excl.)
+      --source-min uint                  Minimum validator index in HD path range (incl.)
+      --withdrawals-mnemonic string      Mnemonic to use for BLS withdrawal creds. Withdrawal accounts are assumed to have standard paths relative to validators.
 ```
 
 ### `pubkeys`
 
+```
 List pubkeys of the given range of validators. Output encoded as one pubkey per line.
+
+Usage:
+  eth2-val-tools pubkeys [flags]
+
+Flags:
+  -h, --help                         help for pubkeys
+      --source-max uint              Maximum validator index in HD path range (excl.)
+      --source-min uint              Minimum validator index in HD path range (incl.)
+      --validators-mnemonic string   Mnemonic to use for validators.
+```
 
 Example, list pubkeys (for a random new mnemonic), account range `[42, 123)`:
 ```shell script

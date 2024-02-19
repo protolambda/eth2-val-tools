@@ -15,34 +15,29 @@ import (
 	"sync"
 
 	"github.com/google/uuid"
-	hbls "github.com/herumi/bls-eth-go-binary/bls"
+	"github.com/spf13/cobra"
+	"github.com/tyler-smith/go-bip39"
+	"golang.org/x/sync/errgroup"
+
+	blshd "github.com/protolambda/bls12-381-hd"
+	blsu "github.com/protolambda/bls12-381-util"
 	"github.com/protolambda/go-keystorev4"
 	"github.com/protolambda/zrnt/eth2/beacon/common"
 	"github.com/protolambda/zrnt/eth2/configs"
 	"github.com/protolambda/zrnt/eth2/util/hashing"
 	"github.com/protolambda/ztyp/tree"
-	"github.com/spf13/cobra"
-	"github.com/tyler-smith/go-bip39"
-	e2types "github.com/wealdtech/go-eth2-types/v2"
-	util "github.com/wealdtech/go-eth2-util"
-	"golang.org/x/sync/errgroup"
 )
 
-func init() {
-	hbls.Init(hbls.BLS12_381)
-	hbls.SetETHmode(hbls.EthModeLatest)
-}
-
 type WalletOutput interface {
-	InsertAccount(priv e2types.PrivateKey, insecure bool, idx uint64) error
+	InsertAccount(sk [32]byte, pub [48]byte, insecure bool, idx uint64) error
 }
 
 // Following EIP 2335
 type KeyFile struct {
 	id        uuid.UUID
 	name      string
-	publicKey e2types.PublicKey
-	secretKey e2types.PrivateKey
+	publicKey [48]byte
+	secretKey [32]byte
 }
 
 type KeyEntry struct {
@@ -51,7 +46,7 @@ type KeyEntry struct {
 	insecure   bool
 }
 
-func NewKeyEntry(priv e2types.PrivateKey, insecure bool) (*KeyEntry, error) {
+func NewKeyEntry(sk [32]byte, pub [48]byte, insecure bool) (*KeyEntry, error) {
 	var pass [32]byte
 	n, err := rand.Read(pass[:])
 	if err != nil {
@@ -65,9 +60,9 @@ func NewKeyEntry(priv e2types.PrivateKey, insecure bool) (*KeyEntry, error) {
 	return &KeyEntry{
 		KeyFile: KeyFile{
 			id:        uuid.New(),
-			name:      "val_" + hex.EncodeToString(priv.PublicKey().Marshal()),
-			publicKey: priv.PublicKey(),
-			secretKey: priv,
+			name:      "val_" + hex.EncodeToString(pub[:]),
+			publicKey: pub,
+			secretKey: sk,
 		},
 		passphrase: passphrase,
 		insecure:   insecure,
@@ -92,15 +87,15 @@ func (ke *KeyEntry) MarshalJSON() ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create AES128CTR params: %w", err)
 	}
-	crypto, err := keystorev4.Encrypt(ke.secretKey.Marshal(), []byte(ke.passphrase),
+	crypto, err := keystorev4.Encrypt(ke.secretKey[:], []byte(ke.passphrase),
 		kdfParams, keystorev4.Sha256ChecksumParams, cipherParams)
 	if err != nil {
 		return nil, fmt.Errorf("failed to encrypt secret: %w", err)
 	}
 	keystore := &keystorev4.Keystore{
 		Crypto:      *crypto,
-		Description: fmt.Sprintf("0x%x", ke.publicKey.Marshal()),
-		Pubkey:      ke.publicKey.Marshal(),
+		Description: fmt.Sprintf("0x%x", ke.publicKey[:]),
+		Pubkey:      ke.publicKey[:],
 		Path:        "",
 		UUID:        ke.id,
 		Version:     4,
@@ -109,11 +104,11 @@ func (ke *KeyEntry) MarshalJSON() ([]byte, error) {
 }
 
 func (ke *KeyEntry) PubHex() string {
-	return "0x" + hex.EncodeToString(ke.publicKey.Marshal())
+	return "0x" + hex.EncodeToString(ke.publicKey[:])
 }
 
 func (ke *KeyEntry) PubHexBare() string {
-	return hex.EncodeToString(ke.publicKey.Marshal())
+	return hex.EncodeToString(ke.publicKey[:])
 }
 
 type WalletWriter struct {
@@ -128,8 +123,8 @@ func NewWalletWriter(entries uint64) *WalletWriter {
 
 }
 
-func (ww *WalletWriter) InsertAccount(priv e2types.PrivateKey, insecure bool, idx uint64) error {
-	key, err := NewKeyEntry(priv, insecure)
+func (ww *WalletWriter) InsertAccount(sk [32]byte, pub [48]byte, insecure bool, idx uint64) error {
+	key, err := NewKeyEntry(sk, pub, insecure)
 	if err != nil {
 		return err
 	}
@@ -164,8 +159,8 @@ func (ww *WalletWriter) buildPrysmWallet(outPath string, prysmPass string) error
 	}
 	store := PrysmAccountStore{}
 	for _, e := range ww.entries {
-		store.PublicKeys = append(store.PublicKeys, e.publicKey.Marshal())
-		store.PrivateKeys = append(store.PrivateKeys, e.secretKey.Marshal())
+		store.PublicKeys = append(store.PublicKeys, e.publicKey[:])
+		store.PrivateKeys = append(store.PrivateKeys, e.secretKey[:])
 	}
 	storeBytes, err := json.MarshalIndent(&store, "", "\t")
 	if err != nil {
@@ -412,12 +407,21 @@ func selectVals(sourceMnemonic string,
 		idx := i
 		g.Go(func() error {
 			valAccPath := fmt.Sprintf("m/12381/3600/%d/0/0", idx)
-			a, err := util.PrivateKeyFromSeedAndPath(valSeed, valAccPath)
+			sk, err := blshd.SecretKeyFromHD(valSeed, valAccPath)
 			if err != nil {
 				return fmt.Errorf("account %s cannot be derived, continuing to next account", valAccPath)
 			}
-			pubkey := narrowedPubkey(hex.EncodeToString(a.PublicKey().Marshal()))
-			if err := output.InsertAccount(a, insecure, idx-minAcc); err != nil {
+			var blsSK blsu.SecretKey
+			if err := blsSK.Deserialize(sk); err != nil {
+				return fmt.Errorf("failed to decode derived secret key: %w", err)
+			}
+			pub, err := blsu.SkToPk(&blsSK)
+			if err != nil {
+				return fmt.Errorf("failed to compute pubkey: %w", err)
+			}
+			pubBytes := pub.Serialize()
+			pubkey := narrowedPubkey(hex.EncodeToString(pubBytes[:]))
+			if err := output.InsertAccount(*sk, pubBytes, insecure, idx-minAcc); err != nil {
 				if err.Error() == fmt.Sprintf("account with name \"%s\" already exists", pubkey) {
 					fmt.Printf("Account with pubkey %s already exists in output wallet, skipping it\n", pubkey)
 				} else {
@@ -493,11 +497,15 @@ func createAddressChangesCmd() *cobra.Command {
 			}
 			for i := accountMin; i < accountMax; i++ {
 				withdrAccPath := fmt.Sprintf("m/12381/3600/%d/0", i)
-				withdr, err := util.PrivateKeyFromSeedAndPath(withdrSeed, withdrAccPath)
+				withdr, err := blshd.SecretKeyFromHD(withdrSeed, withdrAccPath)
 				checkErr(err, fmt.Sprintf("failed to create withdrawal private key for path %q", withdrAccPath))
+				var blsSK blsu.SecretKey
+				checkErr(blsSK.Deserialize(withdr), "failed to decode derived secret key")
+				pub, err := blsu.SkToPk(&blsSK)
+				checkErr(err, "failed to compute pubkey")
 
-				var withdrPub common.BLSPubkey
-				copy(withdrPub[:], withdr.PublicKey().Marshal())
+				withdrPub := common.BLSPubkey(pub.Serialize())
+
 				withdrCreds := hashing.Hash(withdrPub[:])
 				withdrCreds[0] = common.BLS_WITHDRAWAL_PREFIX
 
@@ -506,16 +514,13 @@ func createAddressChangesCmd() *cobra.Command {
 					FromBLSPubKey:      withdrPub,
 					ToExecutionAddress: execAddr,
 				}
-				var secKey hbls.SecretKey
-				checkErr(secKey.Deserialize(withdr.Marshal()), "cannot convert validator priv key")
-
 				msgRoot := msg.HashTreeRoot(tree.GetHashFn())
 				dom := common.ComputeDomain(common.DOMAIN_BLS_TO_EXECUTION_CHANGE, genesisForkVersion, genesisValidatorsRoot)
 				signingRoot := common.ComputeSigningRoot(msgRoot, dom)
-				sig := secKey.SignHash(signingRoot[:])
+				sig := blsu.Sign(&blsSK, signingRoot[:])
 				var signedMsg common.SignedBLSToExecutionChange
 				signedMsg.BLSToExecutionChange = msg
-				copy(signedMsg.Signature[:], sig.Serialize())
+				signedMsg.Signature = sig.Serialize()
 
 				jsonStr, err := json.Marshal(&signedMsg)
 				if asJsonList && i+1 < accountMax {
@@ -573,18 +578,26 @@ func createDepositDatasCmd() *cobra.Command {
 			}
 			for i := accountMin; i < accountMax; i++ {
 				valAccPath := fmt.Sprintf("m/12381/3600/%d/0/0", i)
-				val, err := util.PrivateKeyFromSeedAndPath(valSeed, valAccPath)
+				val, err := blshd.SecretKeyFromHD(valSeed, valAccPath)
 				checkErr(err, fmt.Sprintf("failed to create validator private key for path %q", valAccPath))
 				withdrAccPath := fmt.Sprintf("m/12381/3600/%d/0", i)
-				withdr, err := util.PrivateKeyFromSeedAndPath(withdrSeed, withdrAccPath)
+				withdr, err := blshd.SecretKeyFromHD(withdrSeed, withdrAccPath)
 				checkErr(err, fmt.Sprintf("failed to create withdrawal private key for path %q", withdrAccPath))
 
-				var pub common.BLSPubkey
-				copy(pub[:], val.PublicKey().Marshal())
+				var valSK blsu.SecretKey
+				checkErr(valSK.Deserialize(val), "failed to decode derived validator signing secret key")
+				valPub, err := blsu.SkToPk(&valSK)
+				checkErr(err, "failed to compute pubkey of validator signging key")
 
-				var withdrPub common.BLSPubkey
-				copy(withdrPub[:], withdr.PublicKey().Marshal())
-				withdrCreds := hashing.Hash(withdrPub[:])
+				var withdrSK blsu.SecretKey
+				checkErr(withdrSK.Deserialize(withdr), "failed to decode derived validator withdrawal secret key")
+				withdrPub, err := blsu.SkToPk(&withdrSK)
+				checkErr(err, "failed to compute pubkey of validator withdrawal key")
+
+				pub := common.BLSPubkey(valPub.Serialize())
+
+				withdrPubEncoded := common.BLSPubkey(withdrPub.Serialize())
+				withdrCreds := hashing.Hash(withdrPubEncoded[:])
 				withdrCreds[0] = common.BLS_WITHDRAWAL_PREFIX
 
 				data := common.DepositData{
@@ -594,13 +607,11 @@ func createDepositDatasCmd() *cobra.Command {
 					Signature:             common.BLSSignature{},
 				}
 				msgRoot := data.ToMessage().HashTreeRoot(tree.GetHashFn())
-				var secKey hbls.SecretKey
-				checkErr(secKey.Deserialize(val.Marshal()), "cannot convert validator priv key")
 
 				dom := common.ComputeDomain(common.DOMAIN_DEPOSIT, genesisForkVersion, common.Root{})
 				msg := common.ComputeSigningRoot(msgRoot, dom)
-				sig := secKey.SignHash(msg[:])
-				copy(data.Signature[:], sig.Serialize())
+				sig := blsu.Sign(&valSK, msg[:])
+				data.Signature = sig.Serialize()
 
 				dataRoot := data.HashTreeRoot(tree.GetHashFn())
 				jsonData := map[string]interface{}{
@@ -653,13 +664,16 @@ func createPubkeysCmd() *cobra.Command {
 			checkErr(err, "bad validator mnemonic")
 
 			for i := accountMin; i < accountMax; i++ {
-
 				path := fmt.Sprintf("m/12381/3600/%d/0/0", i)
-				valPrivateKey, err := util.PrivateKeyFromSeedAndPath(valSeed, path)
+				val, err := blshd.SecretKeyFromHD(valSeed, path)
 				checkErr(err, fmt.Sprintf("failed to create validator private key for path %q", path))
 
-				var pub common.BLSPubkey
-				copy(pub[:], valPrivateKey.PublicKey().Marshal())
+				var valSK blsu.SecretKey
+				checkErr(valSK.Deserialize(val), "failed to decode derived validator signing secret key")
+				valPub, err := blsu.SkToPk(&valSK)
+				checkErr(err, "failed to compute pubkey of validator signging key")
+
+				pub := common.BLSPubkey(valPub.Serialize())
 				cmd.Println(pub.String())
 			}
 		},
