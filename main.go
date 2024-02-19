@@ -11,6 +11,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 
@@ -113,12 +114,14 @@ func (ke *KeyEntry) PubHexBare() string {
 
 type WalletWriter struct {
 	sync.RWMutex
-	entries []*KeyEntry
+	entries     []*KeyEntry
+	maxParallel int
 }
 
-func NewWalletWriter(entries uint64) *WalletWriter {
+func NewWalletWriter(entries uint64, maxParallel int) *WalletWriter {
 	return &WalletWriter{
-		entries: make([]*KeyEntry, entries),
+		entries:     make([]*KeyEntry, entries),
+		maxParallel: maxParallel,
 	}
 
 }
@@ -232,6 +235,7 @@ func (ww *WalletWriter) WriteOutputs(fpath string, prysmPass string) error {
 	}
 
 	var g errgroup.Group
+	g.SetLimit(ww.maxParallel)
 	// For all: write JSON keystore files, each in their own directory (lighthouse requirement)
 	for _, k := range ww.entries {
 		e := k
@@ -343,7 +347,7 @@ func makeCheckErr(cmd *cobra.Command) func(err error, msg string) {
 			if msg != "" {
 				err = fmt.Errorf("%s: %v", msg, err)
 			}
-			cmd.PrintErr(err)
+			cmd.PrintErrln(err)
 			os.Exit(1)
 		}
 	}
@@ -362,18 +366,24 @@ func keystoresCommand() *cobra.Command {
 
 	var insecure bool
 
+	var maxParallel int
+
 	cmd := &cobra.Command{
 		Use:   "keystores",
 		Short: "Build range of keystores for any target format",
 		Args:  cobra.NoArgs,
 		Run: func(cmd *cobra.Command, args []string) {
 			checkErr := makeCheckErr(cmd)
+			if maxParallel <= 0 {
+				checkErr(fmt.Errorf("invalid max-parallel %d", maxParallel), "")
+			}
 
-			ww := NewWalletWriter(accountMax - accountMin)
-			checkErr(selectVals(sourceMnemonic, accountMin, accountMax, ww, insecure), "failed to assign validators")
+			ww := NewWalletWriter(accountMax-accountMin, maxParallel)
+			checkErr(selectVals(sourceMnemonic, accountMin, accountMax, ww, insecure, maxParallel), "failed to assign validators")
 			checkErr(ww.WriteOutputs(outputDataPath, prysmPass), "failed to write output")
 		},
 	}
+	cmd.Flags().IntVar(&maxParallel, "max-parallel", min(max(runtime.NumCPU()/2, 1), 10), "Configure maximum number of worker routines doing parallel work.")
 	cmd.Flags().StringVar(&prysmPass, "prysm-pass", "", "Password for all-accounts keystore file (Prysm only)")
 
 	cmd.Flags().StringVar(&outputDataPath, "out-loc", "assigned_data", "Path of the output data for the host, where wallets, keys, secrets dir, etc. are written")
@@ -394,7 +404,7 @@ func narrowedPubkey(pub string) string {
 
 func selectVals(sourceMnemonic string,
 	minAcc uint64, maxAcc uint64,
-	output WalletOutput, insecure bool) error {
+	output WalletOutput, insecure bool, maxParallel int) error {
 
 	valSeed, err := mnemonicToSeed(sourceMnemonic)
 	if err != nil {
@@ -402,6 +412,7 @@ func selectVals(sourceMnemonic string,
 	}
 
 	var g errgroup.Group
+	g.SetLimit(maxParallel)
 	// Try look for unassigned accounts in the wallet
 	for i := minAcc; i < maxAcc; i++ {
 		idx := i
