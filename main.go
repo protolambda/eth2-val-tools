@@ -16,6 +16,7 @@ import (
 	"sync"
 
 	"github.com/google/uuid"
+	"github.com/pkg/profile"
 	"github.com/spf13/cobra"
 	"github.com/tyler-smith/go-bip39"
 	"golang.org/x/sync/errgroup"
@@ -368,11 +369,17 @@ func keystoresCommand() *cobra.Command {
 
 	var maxParallel int
 
+	var doProfile bool
+
 	cmd := &cobra.Command{
 		Use:   "keystores",
 		Short: "Build range of keystores for any target format",
 		Args:  cobra.NoArgs,
 		Run: func(cmd *cobra.Command, args []string) {
+			if doProfile {
+				prof := profile.Start(profile.NoShutdownHook, profile.ProfilePath("."), profile.CPUProfile)
+				defer prof.Stop()
+			}
 			checkErr := makeCheckErr(cmd)
 			if maxParallel <= 0 {
 				checkErr(fmt.Errorf("invalid max-parallel %d", maxParallel), "")
@@ -383,6 +390,7 @@ func keystoresCommand() *cobra.Command {
 			checkErr(ww.WriteOutputs(outputDataPath, prysmPass), "failed to write output")
 		},
 	}
+	cmd.Flags().BoolVar(&doProfile, "pprof", false, "Run performance profiling.")
 	cmd.Flags().IntVar(&maxParallel, "max-parallel", min(max(runtime.NumCPU()/2, 1), 10), "Configure maximum number of worker routines doing parallel work.")
 	cmd.Flags().StringVar(&prysmPass, "prysm-pass", "", "Password for all-accounts keystore file (Prysm only)")
 
