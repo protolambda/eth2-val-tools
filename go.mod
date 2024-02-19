@@ -5,10 +5,10 @@ go 1.21
 toolchain go1.21.5
 
 require (
-	github.com/google/uuid v1.3.0
-	github.com/protolambda/bls12-381-hd v0.0.0-20240219064827-efb5bd410970
-	github.com/protolambda/bls12-381-util v0.0.0-20210720105258-a772f2aac13e
-	github.com/protolambda/go-keystorev4 v0.0.0-20211007151826-f20444f6d564
+	github.com/google/uuid v1.6.0
+	github.com/protolambda/bls12-381-hd v0.1.0
+	github.com/protolambda/bls12-381-util v0.1.0
+	github.com/protolambda/go-keystorev4 v0.1.0
 	github.com/protolambda/zrnt v0.30.0
 	github.com/protolambda/ztyp v0.2.2
 	github.com/spf13/cobra v1.1.3
