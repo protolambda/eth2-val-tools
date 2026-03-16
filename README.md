@@ -38,7 +38,7 @@ Flags:
 
 ### `deposit-data`
 
-To quickly generate a list of deposit datas for a range of accounts. Supports different withdrawal credential types (0x00, 0x01, 0x02).
+To quickly generate a list of deposit datas for a range of accounts. Supports different withdrawal credential types (0x00, 0x01, 0x02, 0x03).
 
 ```
 Create deposit data for the given range of validators with configurable withdrawal credentials. 1 json-encoded deposit data per line.
@@ -54,8 +54,8 @@ Flags:
       --source-max uint                      Maximum validator index in HD path range (excl.)
       --source-min uint                      Minimum validator index in HD path range (incl.)
       --validators-mnemonic string           Mnemonic to use for validators.
-      --withdrawal-address string            Withdrawal address for 0x01 and 0x02 withdrawal credentials. Hex encoded with prefix.
-      --withdrawal-credentials-type string   Type of withdrawal credentials: 0x00 (BLS), 0x01 (execution address), or 0x02 (compounding) (default "0x00")
+      --withdrawal-address string            Withdrawal address for 0x01, 0x02, and 0x03 withdrawal credentials. Hex encoded with prefix.
+      --withdrawal-credentials-type string   Type of withdrawal credentials: 0x00 (BLS), 0x01 (execution address), 0x02 (compounding), or 0x03 (builder) (default "0x00")
       --withdrawals-mnemonic string          Mnemonic to use for BLS withdrawal creds. Only required for 0x00 withdrawal credentials.
 ```
 
@@ -64,6 +64,7 @@ Flags:
 - **0x00 (BLS)**: Traditional BLS withdrawal credentials (default behavior). Requires `--withdrawals-mnemonic`.
 - **0x01 (Execution Address)**: Direct execution address withdrawal credentials. Requires `--withdrawal-address`.
 - **0x02 (Compounding)**: Compounding withdrawal credentials for future EIP-7002 support. Requires `--withdrawal-address`.
+- **0x03 (Builder)**: Builder withdrawal credentials for ePBS (EIP-7732). Requires `--withdrawal-address`.
 
 #### Examples
 
@@ -95,6 +96,16 @@ eth2-val-tools deposit-data \
   --source-min=0 --source-max=5 \
   --fork-version=0x00000000 \
   --withdrawal-credentials-type=0x02
+```
+
+Builder withdrawal credentials (ePBS):
+```shell script
+eth2-val-tools deposit-data \
+  --validators-mnemonic="abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about" \
+  --withdrawal-address=0x742d35Cc6634C0532925a3b8D73e684B8F8832B2 \
+  --source-min=0 --source-max=5 \
+  --fork-version=0x00000000 \
+  --withdrawal-credentials-type=0x03
 ```
 
 ### `bls-address-change`
