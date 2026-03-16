@@ -1,4 +1,4 @@
-FROM golang:1.21 AS build-env
+FROM golang:1.26 AS build-env
 COPY * /src
 WORKDIR /src
 RUN go install .
