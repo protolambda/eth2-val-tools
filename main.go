@@ -649,17 +649,17 @@ func createDepositDatasCmd() *cobra.Command {
 					checkErr(execAddr.UnmarshalText([]byte(withdrawalAddr)), "cannot decode withdrawal address")
 					withdrCreds[0] = 0x02
 					copy(withdrCreds[12:], execAddr[:])
-				case "0x03":
+				case "0xb0":
 					// Builder withdrawal credentials (ePBS / EIP-7732)
 					if withdrawalAddr == "" {
-						checkErr(errors.New("withdrawal-address is required when using 0x03 withdrawal credentials"), "")
+						checkErr(errors.New("withdrawal-address is required when using 0xb0 withdrawal credentials"), "")
 					}
 					var execAddr common.Eth1Address
 					checkErr(execAddr.UnmarshalText([]byte(withdrawalAddr)), "cannot decode withdrawal address")
-					withdrCreds[0] = 0x03
+					withdrCreds[0] = 0xB0
 					copy(withdrCreds[12:], execAddr[:])
 				default:
-					checkErr(fmt.Errorf("invalid withdrawal credential type: %s (must be 0x00, 0x01, 0x02, or 0x03)", withdrawalCredType), "")
+					checkErr(fmt.Errorf("invalid withdrawal credential type: %s (must be 0x00, 0x01, 0x02, or 0xb0)", withdrawalCredType), "")
 				}
 
 				data := common.DepositData{
@@ -700,8 +700,8 @@ func createDepositDatasCmd() *cobra.Command {
 
 	cmd.Flags().StringVar(&validatorsMnemonic, "validators-mnemonic", "", "Mnemonic to use for validators.")
 	cmd.Flags().StringVar(&withdrawalsMnemonic, "withdrawals-mnemonic", "", "Mnemonic to use for BLS withdrawal creds. Only required for 0x00 withdrawal credentials.")
-	cmd.Flags().StringVar(&withdrawalAddr, "withdrawal-address", "", "Withdrawal address for 0x01, 0x02, and 0x03 withdrawal credentials. Hex encoded with prefix.")
-	cmd.Flags().StringVar(&withdrawalCredType, "withdrawal-credentials-type", "0x00", "Type of withdrawal credentials: 0x00 (BLS), 0x01 (execution address), 0x02 (compounding), or 0x03 (builder)")
+	cmd.Flags().StringVar(&withdrawalAddr, "withdrawal-address", "", "Withdrawal address for 0x01, 0x02, and 0xb0 withdrawal credentials. Hex encoded with prefix.")
+	cmd.Flags().StringVar(&withdrawalCredType, "withdrawal-credentials-type", "0x00", "Type of withdrawal credentials: 0x00 (BLS), 0x01 (execution address), 0x02 (compounding), or 0xb0 (builder)")
 	cmd.Flags().Uint64Var(&accountMin, "source-min", 0, "Minimum validator index in HD path range (incl.)")
 	cmd.Flags().Uint64Var(&accountMax, "source-max", 0, "Maximum validator index in HD path range (excl.)")
 	cmd.Flags().Uint64Var(&amountGwei, "amount", uint64(configs.Mainnet.MAX_EFFECTIVE_BALANCE), "Amount to deposit, in Gwei")
