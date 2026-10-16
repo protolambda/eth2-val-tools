@@ -211,11 +211,10 @@ func (ww *WalletWriter) buildPrysmWallet(outPath string, prysmPass string) error
 }
 
 func (ww *WalletWriter) WriteOutputs(fpath string, prysmPass string) error {
-	// Abort if the target already has contents
 	if entries, err := os.ReadDir(fpath); err == nil && len(entries) > 0 {
-    	return errors.New("output for assignments already exists! Aborting")
+		return errors.New("output for assignments already exists! Aborting")
 	} else if err != nil && !os.IsNotExist(err) {
-    	return err
+		return err
 	}
 	if err := os.MkdirAll(fpath, os.ModePerm); err != nil {
 		return err
