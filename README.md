@@ -38,10 +38,22 @@ Flags:
 
 ### `deposit-data`
 
-To quickly generate a list of deposit datas for a range of accounts. Supports different withdrawal credential types (0x00, 0x01, 0x02, 0xb0).
+To quickly generate a list of deposit datas for a range of accounts. Supports different withdrawal credential types (0x01, 0x02, 0xb0, and the deprecated 0x00).
+
+Execution-address withdrawal credentials (`0x01`, or `0x02` for compounding) are the default and recommended path for new deposits.
+Passing `--withdrawal-address` alone selects `0x01`; add `--withdrawal-credentials-type` to pick `0x02` or `0xb0`.
+BLS (`0x00`) withdrawal credentials are deprecated: they are only generated when `--withdrawal-credentials-type=0x00` is passed explicitly, print a warning on stderr, and support will be removed in a future release.
+
+> **Breaking change:** `--withdrawal-credentials-type` no longer defaults to `0x00`.
+> A script that passes `--withdrawals-mnemonic` without `--withdrawal-credentials-type` used to get BLS credentials and now fails with an error.
+> To keep BLS credentials, add `--withdrawal-credentials-type=0x00` (older versions of this tool accept it too); better, switch to `--withdrawal-address`.
+> A run that passes neither `--withdrawal-address` nor `--withdrawals-mnemonic` fails, as before, but with an error asking for `--withdrawal-address`.
+> Passing both without a type is rejected as ambiguous.
 
 ```
 Create deposit data for the given range of validators with configurable withdrawal credentials. 1 json-encoded deposit data per line.
+
+Execution-address withdrawal credentials are recommended: pass --withdrawal-address, which selects 0x01 unless --withdrawal-credentials-type says otherwise (e.g. 0x02 for compounding). BLS (0x00) withdrawal credentials, derived from --withdrawals-mnemonic, are deprecated: they are only generated with an explicit --withdrawal-credentials-type=0x00 and print a warning when used.
 
 Usage:
   eth2-val-tools deposit-data [flags]
@@ -54,38 +66,27 @@ Flags:
       --source-max uint                      Maximum validator index in HD path range (excl.)
       --source-min uint                      Minimum validator index in HD path range (incl.)
       --validators-mnemonic string           Mnemonic to use for validators.
-      --withdrawal-address string            Withdrawal address for 0x01, 0x02, and 0xb0 withdrawal credentials. Hex encoded with prefix.
-      --withdrawal-credentials-type string   Type of withdrawal credentials: 0x00 (BLS), 0x01 (execution address), 0x02 (compounding), or 0xb0 (builder) (default "0x00")
-      --withdrawals-mnemonic string          Mnemonic to use for BLS withdrawal creds. Only required for 0x00 withdrawal credentials.
+      --withdrawal-address string            Execution address for 0x01, 0x02, and 0xb0 withdrawal credentials (recommended over BLS 0x00). Selects 0x01 when --withdrawal-credentials-type is not set. Hex encoded with prefix.
+      --withdrawal-credentials-type string   Type of withdrawal credentials: 0x01 (execution address, recommended), 0x02 (compounding), 0xb0 (builder), or 0x00 (BLS, deprecated, must be set explicitly). Defaults to 0x01 when --withdrawal-address is set; required otherwise.
+      --withdrawals-mnemonic string          DEPRECATED: mnemonic to use for BLS (0x00) withdrawal creds. Only used with an explicit --withdrawal-credentials-type=0x00; use --withdrawal-address instead.
 ```
 
 #### Withdrawal Credential Types
 
-- **0x00 (BLS)**: Traditional BLS withdrawal credentials (default behavior). Requires `--withdrawals-mnemonic`.
-- **0x01 (Execution Address)**: Direct execution address withdrawal credentials. Requires `--withdrawal-address`.
-- **0x02 (Compounding)**: Compounding withdrawal credentials for future EIP-7002 support. Requires `--withdrawal-address`.
+- **0x01 (Execution Address)**: Execution address withdrawal credentials. Recommended, and the default when `--withdrawal-address` is given without a type.
+- **0x02 (Compounding)**: Compounding execution address withdrawal credentials (EIP-7251). Requires `--withdrawal-address`.
 - **0xb0 (Builder)**: Builder withdrawal credentials for ePBS (EIP-7732). Requires `--withdrawal-address`.
+- **0x00 (BLS)**: *Deprecated.* BLS withdrawal credentials derived from `--withdrawals-mnemonic`. Only generated with an explicit `--withdrawal-credentials-type=0x00`; prints a deprecation warning when used.
 
 #### Examples
 
-Traditional BLS withdrawal credentials:
-```shell script
-eth2-val-tools deposit-data \
-  --validators-mnemonic="abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about" \
-  --withdrawals-mnemonic="abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about" \
-  --source-min=0 --source-max=5 \
-  --fork-version=0x00000000 \
-  --withdrawal-credentials-type=0x00
-```
-
-Execution address withdrawal credentials:
+Execution address withdrawal credentials (recommended; `0x01` is selected because no type is given):
 ```shell script
 eth2-val-tools deposit-data \
   --validators-mnemonic="abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about" \
   --withdrawal-address=0x742d35Cc6634C0532925a3b8D73e684B8F8832B2 \
   --source-min=0 --source-max=5 \
-  --fork-version=0x00000000 \
-  --withdrawal-credentials-type=0x01
+  --fork-version=0x00000000
 ```
 
 Compounding withdrawal credentials:
@@ -106,6 +107,16 @@ eth2-val-tools deposit-data \
   --source-min=0 --source-max=5 \
   --fork-version=0x00000000 \
   --withdrawal-credentials-type=0xb0
+```
+
+BLS withdrawal credentials (deprecated, prints a warning; existing 0x00 validators can move to an execution address with `bls-address-change`):
+```shell script
+eth2-val-tools deposit-data \
+  --validators-mnemonic="abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about" \
+  --withdrawals-mnemonic="abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about" \
+  --source-min=0 --source-max=5 \
+  --fork-version=0x00000000 \
+  --withdrawal-credentials-type=0x00
 ```
 
 ### `bls-address-change`

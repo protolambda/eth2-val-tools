@@ -15,4 +15,5 @@ eth2-val-tools deposit-data \
   --amount="$DEPOSIT_AMOUNT" \
   --fork-version="$FORK_VERSION" \
   --withdrawals-mnemonic="$WITHDRAWALS_MNEMONIC" \
+  --withdrawal-credentials-type=0x00 \
   --validators-mnemonic="$VALIDATORS_MNEMONIC" > $DEPOSIT_DATAS_FILE
