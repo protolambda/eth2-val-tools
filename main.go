@@ -567,6 +567,42 @@ func createAddressChangesCmd() *cobra.Command {
 	return cmd
 }
 
+const blsWithdrawalCredsDeprecation = "BLS (0x00) withdrawal credentials are deprecated for new deposits and will be removed in a future release; " +
+	"use --withdrawal-credentials-type=0x01 (or 0x02) with --withdrawal-address=<execution address> instead"
+
+// blsWithdrawalCredsWarning returns the warning to print when deposit data is generated with
+// BLS (0x00) withdrawal credentials, or "" for any other type.
+func blsWithdrawalCredsWarning(credType string) string {
+	if credType != "0x00" {
+		return ""
+	}
+	return "WARNING: " + blsWithdrawalCredsDeprecation + "."
+}
+
+// resolveWithdrawalCredType picks the withdrawal credentials type for deposit-data. An explicit
+// --withdrawal-credentials-type is used as given. Without one, a --withdrawal-address selects
+// 0x01; anything else is an error, so BLS (0x00) credentials are only produced when asked for
+// by name.
+func resolveWithdrawalCredType(credType string, withdrawalAddr string, withdrawalsMnemonic string) (string, error) {
+	if credType != "" {
+		return credType, nil
+	}
+	if withdrawalAddr != "" && withdrawalsMnemonic != "" {
+		return "", errors.New("both --withdrawal-address and --withdrawals-mnemonic are set; " +
+			"pass --withdrawal-credentials-type to choose between them (0x01 or 0x02 recommended)")
+	}
+	if withdrawalAddr != "" {
+		return "0x01", nil
+	}
+	if withdrawalsMnemonic != "" {
+		return "", errors.New("--withdrawal-credentials-type no longer defaults to 0x00: " +
+			"pass --withdrawal-address=<execution address> for 0x01 credentials (recommended), " +
+			"or --withdrawal-credentials-type=0x00 to keep generating deprecated BLS withdrawal credentials")
+	}
+	return "", errors.New("no withdrawal credentials given: pass --withdrawal-address=<execution address> " +
+		"(0x01 by default, or add --withdrawal-credentials-type=0x02 for compounding)")
+}
+
 func createDepositDatasCmd() *cobra.Command {
 	var accountMin uint64
 	var accountMax uint64
@@ -585,7 +621,12 @@ func createDepositDatasCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "deposit-data",
 		Short: "Create deposit data for the given range of validators with configurable withdrawal credentials. 1 json-encoded deposit data per line.",
-		Args:  cobra.NoArgs,
+		Long: "Create deposit data for the given range of validators with configurable withdrawal credentials. 1 json-encoded deposit data per line.\n\n" +
+			"Execution-address withdrawal credentials are recommended: pass --withdrawal-address, which selects 0x01 unless " +
+			"--withdrawal-credentials-type says otherwise (e.g. 0x02 for compounding). " +
+			"BLS (0x00) withdrawal credentials, derived from --withdrawals-mnemonic, are deprecated: they are only generated with an explicit " +
+			"--withdrawal-credentials-type=0x00 and print a warning when used.",
+		Args: cobra.NoArgs,
 		Run: func(cmd *cobra.Command, args []string) {
 			checkErr := makeCheckErr(cmd)
 			var genesisForkVersion common.Version
@@ -593,6 +634,14 @@ func createDepositDatasCmd() *cobra.Command {
 
 			valSeed, err := mnemonicToSeed(validatorsMnemonic)
 			checkErr(err, "bad validator mnemonic")
+
+			withdrawalCredType, err = resolveWithdrawalCredType(withdrawalCredType, withdrawalAddr, withdrawalsMnemonic)
+			checkErr(err, "")
+
+			// Warnings go to stderr so the deposit data on stdout stays machine-readable.
+			if warning := blsWithdrawalCredsWarning(withdrawalCredType); warning != "" {
+				cmd.PrintErrln(warning)
+			}
 
 			var withdrSeed []byte
 			if withdrawalCredType == "0x00" {
@@ -622,7 +671,7 @@ func createDepositDatasCmd() *cobra.Command {
 				var withdrCreds [32]byte
 				switch withdrawalCredType {
 				case "0x00":
-					// BLS withdrawal credentials (default)
+					// BLS withdrawal credentials (deprecated, explicit opt-in only)
 					withdrAccPath := fmt.Sprintf("m/12381/3600/%d/0", i)
 					withdr, err := blshd.SecretKeyFromHD(withdrSeed, withdrAccPath)
 					checkErr(err, fmt.Sprintf("failed to create withdrawal private key for path %q", withdrAccPath))
@@ -701,9 +750,9 @@ func createDepositDatasCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&validatorsMnemonic, "validators-mnemonic", "", "Mnemonic to use for validators.")
-	cmd.Flags().StringVar(&withdrawalsMnemonic, "withdrawals-mnemonic", "", "Mnemonic to use for BLS withdrawal creds. Only required for 0x00 withdrawal credentials.")
-	cmd.Flags().StringVar(&withdrawalAddr, "withdrawal-address", "", "Withdrawal address for 0x01, 0x02, and 0xb0 withdrawal credentials. Hex encoded with prefix.")
-	cmd.Flags().StringVar(&withdrawalCredType, "withdrawal-credentials-type", "0x00", "Type of withdrawal credentials: 0x00 (BLS), 0x01 (execution address), 0x02 (compounding), or 0xb0 (builder)")
+	cmd.Flags().StringVar(&withdrawalsMnemonic, "withdrawals-mnemonic", "", "DEPRECATED: mnemonic to use for BLS (0x00) withdrawal creds. Only used with an explicit --withdrawal-credentials-type=0x00; use --withdrawal-address instead.")
+	cmd.Flags().StringVar(&withdrawalAddr, "withdrawal-address", "", "Execution address for 0x01, 0x02, and 0xb0 withdrawal credentials (recommended over BLS 0x00). Selects 0x01 when --withdrawal-credentials-type is not set. Hex encoded with prefix.")
+	cmd.Flags().StringVar(&withdrawalCredType, "withdrawal-credentials-type", "", "Type of withdrawal credentials: 0x01 (execution address, recommended), 0x02 (compounding), 0xb0 (builder), or 0x00 (BLS, deprecated, must be set explicitly). Defaults to 0x01 when --withdrawal-address is set; required otherwise.")
 	cmd.Flags().Uint64Var(&accountMin, "source-min", 0, "Minimum validator index in HD path range (incl.)")
 	cmd.Flags().Uint64Var(&accountMax, "source-max", 0, "Maximum validator index in HD path range (excl.)")
 	cmd.Flags().Uint64Var(&amountGwei, "amount", uint64(configs.Mainnet.MAX_EFFECTIVE_BALANCE), "Amount to deposit, in Gwei")
